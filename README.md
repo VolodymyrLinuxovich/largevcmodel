@@ -233,7 +233,7 @@ flowchart TD
 ## Human-in-the-Loop Control
 
 ```mermaid
-flowchart LR
+flowchart TD
     DraftOnly["Draft-only mode"]
     ApprovalSend["Approval-before-send mode"]
     AutoSend["Auto-send mode"]
@@ -247,7 +247,7 @@ flowchart LR
 ## Final Architecture Loop
 
 ```mermaid
-flowchart LR
+flowchart TD
     A["Partner request"] --> B["Contact retrieval"]
     B --> C["Fit scoring"]
     C --> D["Personalized outreach"]
