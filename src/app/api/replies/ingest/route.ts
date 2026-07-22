@@ -1,60 +1,52 @@
+import { OutreachStatus } from "@prisma/client";
 import { z } from "zod";
-import { demoSampleReplies } from "@/lib/demo/fixtures";
-import { badRequest, notFound, ok, serverError } from "@/lib/api/respond";
+import { audit } from "@/lib/audit";
+import { requireCurrentUser } from "@/lib/auth/current-user";
+import { badRequest, ok, serverError } from "@/lib/api/respond";
 import { classifyReply } from "@/lib/domain/replies";
 import { prisma } from "@/lib/prisma";
 
 const requestSchema = z.object({
-  contactId: z.string().min(1),
-  draftId: z.string().optional(),
-  sampleType: z.string().optional(),
-  body: z.string().optional(),
+  contactId: z.string().min(1).optional(),
+  draftId: z.string().min(1).optional(),
+  gmailMessageId: z.string().min(1).optional(),
+  bodySnippet: z.string().min(2).max(2000),
 });
 
 export async function POST(request: Request) {
   try {
+    const user = await requireCurrentUser();
     const parsed = requestSchema.safeParse(await request.json());
     if (!parsed.success) return badRequest("Invalid reply request", parsed.error.flatten());
-    const contact = await prisma.contact.findUnique({ where: { id: parsed.data.contactId } });
-    if (!contact) return notFound("Founder contact not found");
-
-    const body =
-      parsed.data.body ??
-      demoSampleReplies.find((reply) => reply.type === (parsed.data.sampleType ?? "interested"))?.body ??
-      demoSampleReplies[0].body;
-    const classification = classifyReply(body);
+    const classification = classifyReply(parsed.data.bodySnippet);
     const reply = await prisma.reply.create({
       data: {
-        contactId: contact.id,
+        userId: user.id,
+        contactId: parsed.data.contactId,
         draftId: parsed.data.draftId,
-        body,
+        gmailMessageId: parsed.data.gmailMessageId,
+        bodySnippet: parsed.data.bodySnippet,
         classification: classification.classification,
         confidence: classification.confidence,
         requiresHumanReview: classification.requiresHumanReview,
       },
     });
 
-    await prisma.contact.update({
-      where: { id: contact.id },
-      data: {
-        crmStatus:
-          classification.classification === "interested"
-            ? "Replied - Interested"
-            : classification.requiresHumanReview
-              ? "Human Review"
-              : `Reply - ${classification.classification.replaceAll("_", " ")}`,
-      },
-    });
+    if (parsed.data.draftId) {
+      await prisma.outreachDraft.updateMany({
+        where: { id: parsed.data.draftId, userId: user.id },
+        data: { status: OutreachStatus.RECEIVED_REPLY },
+      });
+    }
 
-    await prisma.auditEvent.create({
-      data: {
-        actor: "LargeVCModel Reply Agent",
-        actorType: "agent",
-        action: "Classified reply",
-        affectedFounderId: contact.id,
-        dataSource: "simulated_reply",
-        details: `Reply classified as ${classification.classification} with ${classification.confidence}% confidence.`,
-      },
+    await audit(prisma, {
+      userId: user.id,
+      actor: "LargeVCModel",
+      action: "Reply classified",
+      outcome: classification.requiresHumanReview ? "requires_human_review" : "completed",
+      affectedContactId: parsed.data.contactId,
+      dataSource: parsed.data.gmailMessageId ? "Gmail" : "User-provided reply text",
+      details: `Reply classified as ${classification.classification} with ${classification.confidence}% confidence.`,
     });
 
     return ok({ reply, classification });

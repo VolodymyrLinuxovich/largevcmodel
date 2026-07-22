@@ -1,441 +1,313 @@
-import type { PrismaClient } from "@prisma/client";
-import { canonicalizeUrl, dedupeSources, sourceDomain } from "./sources";
+import { ClaimProvenance, PrismaClient, ResearchStatus } from "@prisma/client";
+import { z } from "zod";
+import { audit } from "@/lib/audit";
+import { canonicalizeUrl, dedupeSources } from "./sources";
 import { calculateFitScore, DEFAULT_SCORING_WEIGHTS } from "./scoring";
-import { parsePartnerIntent, type StructuredIntent } from "./query";
-import type { ResearchResult, ScoringWeights } from "./types";
-import { researchWithFallback } from "@/lib/research/provider";
+import { researchWithConfiguredProvider } from "@/lib/research/provider";
 
-type ContactWithCompany = Awaited<ReturnType<typeof getContactsWithCompanies>>[number];
+export const queryRequestSchema = z.object({
+  query: z.string().min(2).max(1000),
+  stage: z.string().optional(),
+  sector: z.string().optional(),
+  geography: z.string().optional(),
+  relationshipStrength: z.coerce.number().min(0).max(10).optional(),
+});
 
-async function getContactsWithCompanies(prisma: PrismaClient) {
-  return prisma.contact.findMany({
-    include: {
-      company: true,
-      founderProfile: true,
-    },
-    orderBy: {
-      relationshipStrength: "desc",
-    },
-  });
+export const researchRequestSchema = z.object({
+  contactId: z.string().min(1).optional(),
+  companyId: z.string().min(1).optional(),
+  query: z.string().min(2).max(1000),
+});
+
+function claimProvenance(value: string) {
+  if (value === "public_research") return ClaimProvenance.PUBLIC_RESEARCH;
+  if (value === "connected_account") return ClaimProvenance.CONNECTED_ACCOUNT;
+  if (value === "user_provided") return ClaimProvenance.USER_PROVIDED;
+  if (value === "ai_inference") return ClaimProvenance.AI_INFERENCE;
+  return ClaimProvenance.UNVERIFIED;
 }
 
-export async function executeResearchQuery(
-  prisma: PrismaClient,
-  input: {
-    query: string;
-    filters?: Record<string, string | undefined>;
-    weights?: ScoringWeights;
-  },
-) {
-  const intent = parsePartnerIntent(input.query, input.filters);
-  const weights = input.weights ?? DEFAULT_SCORING_WEIGHTS;
-  const startedAt = new Date();
-  const run = await prisma.researchRun.create({
-    data: {
-      query: input.query,
-      structuredIntent: JSON.stringify(intent),
-      provider: process.env.RESEARCH_PROVIDER === "hermes" ? "hermes" : "mock",
-      status: "running",
-      summary: "Research run started.",
-      executionSteps: JSON.stringify([
-        step("Parsing investment objective", "complete", "Converted natural language into sector, stage, geography, funding, and relationship filters."),
-        step("Searching internal CRM", "running", "Searching seeded CRM contacts, company records, event notes, and relationship edges."),
-      ]),
-      startedAt,
+function terms(query: string) {
+  return query
+    .toLowerCase()
+    .split(/[^a-z0-9@.]+/)
+    .filter((term) => term.length > 2)
+    .slice(0, 12);
+}
+
+export function parseInvestmentIntent(input: {
+  query: string;
+  stage?: string;
+  sector?: string;
+  geography?: string;
+  relationshipStrength?: number;
+}) {
+  const lower = input.query.toLowerCase();
+  return {
+    sectors: input.sector ? [input.sector] : lower.includes("ai") ? ["AI"] : [],
+    stages: input.stage ? [input.stage] : lower.includes("seed") ? ["Seed"] : [],
+    geographies: input.geography
+      ? [input.geography]
+      : lower.includes("bay area") || lower.includes("san francisco")
+        ? ["Bay Area", "San Francisco"]
+        : [],
+    minimumRelationshipStrength: input.relationshipStrength,
+    rawQuery: input.query,
+  };
+}
+
+export async function executeResearchQuery(prisma: PrismaClient, userId: string, input: z.infer<typeof queryRequestSchema>) {
+  const intent = parseInvestmentIntent(input);
+  const searchTerms = terms(input.query);
+  const filters = [
+    ...searchTerms.flatMap((term) => [
+      { fullName: { contains: term, mode: "insensitive" as const } },
+      { primaryEmail: { contains: term, mode: "insensitive" as const } },
+      { organization: { contains: term, mode: "insensitive" as const } },
+      { title: { contains: term, mode: "insensitive" as const } },
+      { notes: { contains: term, mode: "insensitive" as const } },
+    ]),
+  ];
+
+  const contacts = await prisma.contact.findMany({
+    where: {
+      userId,
+      ...(filters.length ? { OR: filters } : {}),
+      ...(input.relationshipStrength !== undefined ? { relationshipStrength: { gte: input.relationshipStrength } } : {}),
     },
+    include: {
+      company: true,
+      fitScores: { orderBy: { calculatedAt: "desc" }, take: 1 },
+      gmailThreads: { orderBy: { lastMessageAt: "desc" }, take: 2 },
+      calendarEvents: { orderBy: { startsAt: "desc" }, take: 2 },
+    },
+    orderBy: [{ relationshipStrength: "desc" }, { lastInteractionAt: "desc" }],
+    take: 25,
   });
 
-  const candidates = await searchCandidates(prisma, intent);
+  await audit(prisma, {
+    userId,
+    actor: "LargeVCModel",
+    action: "Network search completed",
+    outcome: "completed",
+    dataSource: "Connected account data",
+    details: `${contacts.length} matching contact records returned for a user query.`,
+  });
 
-  const allResearch: Array<{ contact: ContactWithCompany; result: ResearchResult }> = [];
-  const storedSources = new Map<string, Awaited<ReturnType<typeof upsertSource>>>();
-  const providerWarnings: string[] = [];
+  return { intent, contacts };
+}
 
-  for (const contact of candidates) {
-    const result = await researchWithFallback({
-      contactId: contact.id,
-      founderName: contact.fullName,
-      companyName: contact.company?.name ?? "Unknown company",
-      companyId: contact.companyId,
-      query: input.query,
-      sector: contact.company?.sector ?? contact.sector,
-      stage: contact.company?.stage ?? contact.stage,
-      geography: contact.location,
-    });
-    providerWarnings.push(...result.unavailable.filter((warning) => warning.includes("Hermes provider unavailable")));
-    allResearch.push({ contact, result });
+export async function researchSubject(prisma: PrismaClient, userId: string, input: z.infer<typeof researchRequestSchema>) {
+  const [contact, company] = await Promise.all([
+    input.contactId
+      ? prisma.contact.findFirst({ where: { id: input.contactId, userId }, include: { company: true } })
+      : Promise.resolve(null),
+    input.companyId ? prisma.company.findFirst({ where: { id: input.companyId, userId } }) : Promise.resolve(null),
+  ]);
 
-    for (const source of dedupeSources(result.sources)) {
-      const stored = await upsertSource(prisma, source);
-      storedSources.set(stored.id, stored);
-    }
+  if (!contact && !company) {
+    throw new Error("Select a real contact or company before starting research.");
   }
 
-  await prisma.researchRun.update({
-    where: { id: run.id },
+  const run = await prisma.researchRun.create({
     data: {
-      executionSteps: JSON.stringify([
-        step("Parsing investment objective", "complete", "Converted natural language into sector, stage, geography, funding, and relationship filters."),
-        step("Searching internal CRM", "complete", `Found ${candidates.length} relevant seeded founder contacts.`),
-        step("Researching public information through Hermes", "complete", "Collected demo public-source records through the configured research provider."),
-        step("Deduplicating candidates", "complete", "Merged source records by canonical URL and kept CRM records distinct."),
-        step("Calculating thesis fit", "running", "Applying editable prioritization weights."),
-      ]),
+      userId,
+      query: input.query,
+      subjectType: contact ? "contact" : "company",
+      subjectId: contact?.id ?? company?.id,
+      provider: process.env.RESEARCH_PROVIDER || "none",
+      status: ResearchStatus.RUNNING,
+      structuredInput: {
+        contactId: contact?.id,
+        companyId: contact?.companyId ?? company?.id,
+        subject: contact?.fullName ?? company?.name,
+      },
+      modelOrProvider: process.env.RESEARCH_PROVIDER || "none",
     },
   });
 
-  const contactSourceIds = new Map<string, Set<string>>();
-  const contactPublicSourceIds = new Map<string, Set<string>>();
-  const contactClaimCounts = new Map<string, number>();
+  try {
+    const result = await researchWithConfiguredProvider({
+      contactId: contact?.id,
+      founderName: contact?.fullName,
+      companyName: contact?.organization ?? contact?.company?.name ?? company?.name,
+      companyId: contact?.companyId ?? company?.id,
+      query: input.query,
+      sector: company?.sector ?? contact?.company?.sector,
+      stage: company?.stage ?? contact?.company?.stage,
+      geography: company?.geography,
+    });
 
-  for (const { contact, result } of allResearch) {
+    const sources = await Promise.all(
+      dedupeSources(result.sources).map(async (source) => {
+        const canonicalUrl = canonicalizeUrl(source.url);
+        return prisma.source.upsert({
+          where: { userId_canonicalUrl: { userId, canonicalUrl } },
+          create: {
+            userId,
+            contactId: source.contactId ?? contact?.id ?? null,
+            companyId: source.companyId ?? contact?.companyId ?? company?.id ?? null,
+            title: source.title,
+            url: source.url,
+            canonicalUrl,
+            publisher: source.publisher ?? null,
+            publishedAt: source.publishedAt ? new Date(source.publishedAt) : null,
+            accessedAt: new Date(source.accessedAt),
+            sourceType: source.sourceType,
+            origin: source.origin,
+            snippet: source.snippet ?? null,
+            supportsClaims: source.supportsClaims,
+          },
+          update: {
+            title: source.title,
+            publisher: source.publisher ?? null,
+            publishedAt: source.publishedAt ? new Date(source.publishedAt) : null,
+            accessedAt: new Date(source.accessedAt),
+            sourceType: source.sourceType,
+            origin: source.origin,
+            snippet: source.snippet ?? null,
+            supportsClaims: source.supportsClaims,
+          },
+        });
+      }),
+    );
+
+    const sourcesByCanonicalUrl = new Map(sources.map((source) => [source.canonicalUrl, source]));
+
     for (const claim of result.claims) {
-      const createdClaim = await prisma.researchClaim.create({
+      const storedClaim = await prisma.researchClaim.create({
         data: {
+          userId,
           researchRunId: run.id,
-          contactId: claim.contactId ?? contact.id,
-          companyId: claim.companyId ?? contact.companyId,
+          contactId: claim.contactId ?? contact?.id ?? null,
+          companyId: claim.companyId ?? contact?.companyId ?? company?.id ?? null,
           text: claim.text,
           category: claim.category,
-          provenance: claim.provenance,
-          confidence: claim.confidence,
+          provenance: claimProvenance(claim.provenance),
+          confidence: claim.confidence ?? null,
         },
       });
 
-      const sourceUrls = claim.sourceUrls ?? [];
-      for (const sourceUrl of sourceUrls) {
-        const source = await prisma.source.findUnique({
-          where: { canonicalUrl: canonicalizeUrl(sourceUrl) },
-        });
+      for (const sourceUrl of claim.sourceUrls ?? []) {
+        const source = sourcesByCanonicalUrl.get(canonicalizeUrl(sourceUrl));
         if (!source) continue;
-        await prisma.claimSource.upsert({
-          where: {
-            claimId_sourceId: {
-              claimId: createdClaim.id,
-              sourceId: source.id,
-            },
-          },
-          update: { supportedClaim: claim.text },
-          create: {
-            claimId: createdClaim.id,
-            sourceId: source.id,
-            supportedClaim: claim.text,
-          },
+        await prisma.claimSource.create({
+          data: { claimId: storedClaim.id, sourceId: source.id, supportedClaim: claim.text },
         });
-        const allSet = contactSourceIds.get(contact.id) ?? new Set<string>();
-        allSet.add(source.id);
-        contactSourceIds.set(contact.id, allSet);
-        if (source.sourceType !== "internal_crm") {
-          const publicSet = contactPublicSourceIds.get(contact.id) ?? new Set<string>();
-          publicSet.add(source.id);
-          contactPublicSourceIds.set(contact.id, publicSet);
-        }
       }
-
-      contactClaimCounts.set(contact.id, (contactClaimCounts.get(contact.id) ?? 0) + 1);
     }
-  }
 
-  const scoreRows = [];
-  for (const contact of candidates) {
-    const sourceIds = Array.from(contactSourceIds.get(contact.id) ?? []);
-    const publicSourceIds = Array.from(contactPublicSourceIds.get(contact.id) ?? []);
-    const score = calculateFitScore(
-      {
-        contactId: contact.id,
-        fullName: contact.fullName,
-        sector: contact.sector,
-        stage: contact.stage,
-        location: contact.location,
-        relationshipStrength: contact.relationshipStrength,
-        researchConfidence: contact.researchConfidence,
-        company: contact.company
-          ? {
-              sector: contact.company.sector,
-              stage: contact.company.stage,
-              headquarters: contact.company.headquarters,
-              latestFundingDate: contact.company.latestFundingDate,
-              latestFundingRound: contact.company.latestFundingRound,
-              latestFundingAmount: contact.company.latestFundingAmount,
-              checkSizeFit: contact.company.checkSizeFit,
-            }
-          : null,
-        sourceCount: sourceIds.length,
-        publicSourceCount: publicSourceIds.length,
-        supportedClaimCount: contactClaimCounts.get(contact.id) ?? 0,
-        citationSourceIds: publicSourceIds.length ? publicSourceIds : sourceIds,
-      },
-      weights,
-    );
-    const fitScore = await prisma.fitScore.create({
+    await prisma.researchRun.update({
+      where: { id: run.id },
       data: {
-        researchRunId: run.id,
-        contactId: contact.id,
+        status: ResearchStatus.COMPLETED,
+        summary: result.summary,
+        provider: result.provider,
+        completedAt: new Date(),
+      },
+    });
+
+    await audit(prisma, {
+      userId,
+      actor: "Hermes research provider",
+      action: "Research completed",
+      outcome: "completed",
+      affectedContactId: contact?.id,
+      dataSource: result.provider,
+      details: `${sources.length} sources and ${result.claims.length} claims persisted with provenance.`,
+      researchRunId: run.id,
+    });
+
+    return prisma.researchRun.findUnique({
+      where: { id: run.id },
+      include: {
+        claims: { include: { sources: { include: { source: true } } } },
+        fitScores: true,
+      },
+    });
+  } catch (error) {
+    await prisma.researchRun.update({
+      where: { id: run.id },
+      data: {
+        status: ResearchStatus.UNAVAILABLE,
+        error: error instanceof Error ? error.message : "Research provider unavailable",
+        completedAt: new Date(),
+      },
+    });
+    await audit(prisma, {
+      userId,
+      actor: "Research provider",
+      action: "Research failed",
+      outcome: "unavailable",
+      affectedContactId: contact?.id,
+      dataSource: process.env.RESEARCH_PROVIDER || "none",
+      details: error instanceof Error ? error.message : "Research provider unavailable",
+      researchRunId: run.id,
+    });
+    return prisma.researchRun.findUnique({ where: { id: run.id }, include: { claims: true, fitScores: true } });
+  }
+}
+
+export async function scoreContact(prisma: PrismaClient, userId: string, contactId: string) {
+  const contact = await prisma.contact.findFirst({
+    where: { id: contactId, userId },
+    include: { company: true, claims: true, sources: true },
+  });
+  if (!contact) throw new Error("Contact not found");
+
+  const thesis = await prisma.investmentThesis.findFirst({ where: { userId, active: true }, orderBy: { updatedAt: "desc" } });
+  const score = calculateFitScore(
+    {
+      contactId: contact.id,
+      companyId: contact.companyId,
+      fullName: contact.fullName,
+      organization: contact.organization ?? contact.company?.name,
+      title: contact.title,
+      sector: contact.company?.sector,
+      stage: contact.company?.stage,
+      geography: contact.company?.geography,
+      relationshipStrength: contact.relationshipStrength,
+      interactionCount: contact.interactionCount,
+      lastInteractionAt: contact.lastInteractionAt,
+      sourceCount: contact.sources.length,
+      supportedClaimCount: contact.claims.length,
+      thesis,
+    },
+    DEFAULT_SCORING_WEIGHTS,
+  );
+
+  const stored = await prisma.fitScore.create({
+    data: {
+      userId,
+      contactId: contact.id,
+      companyId: contact.companyId,
+      thesisId: thesis?.id,
+      overall: score.overall,
+      confidence: score.confidence,
+      criteria: {
         thesisMatch: score.thesisMatch,
         stageFit: score.stageFit,
         geographyFit: score.geographyFit,
         momentum: score.momentum,
         relationship: score.relationship,
         evidence: score.evidence,
-        overall: score.overall,
-        explanation: score.explanation,
-        weightsJson: JSON.stringify(score.weights),
-        citationsJson: JSON.stringify(score.citations),
       },
-    });
-    scoreRows.push({ contact, score: fitScore });
-  }
-
-  scoreRows.sort((a, b) => b.score.overall - a.score.overall);
-  await prisma.contact.updateMany({
-    where: {
-      id: {
-        in: scoreRows.slice(0, 6).map((row) => row.contact.id),
-      },
-    },
-    data: {
-      crmStatus: "Ranked",
+      weights: score.weights,
+      missingInfo: score.missingInfo,
+      explanation: score.explanation,
+      modelOrProvider: "LargeVCModel heuristic v1",
     },
   });
 
-  const executionSteps = [
-    step("Parsing investment objective", "complete", "Converted natural language into sector, stage, geography, funding, and relationship filters."),
-    step("Searching internal CRM", "complete", `Found ${candidates.length} relevant seeded founder contacts.`),
-    step("Researching public information through Hermes", "complete", "Collected provider-backed source records and preserved provenance on every claim."),
-    step("Deduplicating candidates", "complete", "Merged duplicate sources by canonical URL."),
-    step("Calculating thesis fit", "complete", "Applied the editable heuristic score formula."),
-    step("Identifying warm introduction paths", "complete", "Attached internal CRM, event, and manually entered relationship paths."),
-    step("Generating outreach drafts", "pending", "Ready for partner approval workflow."),
-  ];
-
-  const updatedRun = await prisma.researchRun.update({
-    where: { id: run.id },
-    data: {
-      provider: allResearch.some((item) => item.result.provider === "hermes" || item.result.provider === "hermes_cli")
-        ? allResearch.find((item) => item.result.provider === "hermes_cli") ? "hermes_cli" : "hermes"
-        : "mock",
-      status: "complete",
-      summary: `Ranked ${scoreRows.length} founders for the requested AI infrastructure seed thesis. ${providerWarnings.length ? "Hermes fallback was recorded in the audit log." : "All research results retained source provenance."}`,
-      completedAt: new Date(),
-      executionSteps: JSON.stringify(executionSteps),
-    },
+  await audit(prisma, {
+    userId,
+    actor: "LargeVCModel",
+    action: "Fit score generated",
+    outcome: "completed",
+    affectedContactId: contact.id,
+    dataSource: "Research claims and connected-account metadata",
+    details: `Overall score ${stored.overall} with confidence ${stored.confidence}.`,
   });
 
-  await prisma.auditEvent.create({
-    data: {
-      actor: "LargeVCModel Research Agent",
-      actorType: "agent",
-      action: "Completed research run",
-      dataSource: updatedRun.provider,
-      details: `Query "${input.query}" produced ${scoreRows.length} ranked candidates. Sources were deduplicated by canonical URL. ${providerWarnings.join(" ")}`,
-      researchRunId: updatedRun.id,
-    },
-  });
-
-  const response = await buildResearchRunPayload(prisma, updatedRun.id);
-  return response;
-}
-
-export async function researchSingleFounder(
-  prisma: PrismaClient,
-  input: {
-    contactId: string;
-    query?: string;
-  },
-) {
-  const contact = await prisma.contact.findUnique({
-    where: { id: input.contactId },
-    include: { company: true, founderProfile: true },
-  });
-  if (!contact) return null;
-
-  const query = input.query ?? `Research ${contact.fullName} at ${contact.company?.name ?? "their company"}`;
-  return executeResearchQuery(prisma, {
-    query,
-    filters: {
-      sector: contact.company?.sector ?? contact.sector,
-      stage: contact.company?.stage ?? contact.stage,
-      geography: contact.location,
-    },
-  });
-}
-
-export async function buildResearchRunPayload(prisma: PrismaClient, runId: string) {
-  const run = await prisma.researchRun.findUnique({
-    where: { id: runId },
-    include: {
-      fitScores: {
-        include: {
-          contact: {
-            include: {
-              company: true,
-              founderProfile: true,
-            },
-          },
-        },
-      },
-      claims: {
-        include: {
-          sources: {
-            include: {
-              source: true,
-            },
-          },
-        },
-      },
-    },
-  });
-  if (!run) return null;
-
-  const sourceById = new Map<string, (typeof run.claims)[number]["sources"][number]["source"]>();
-  for (const claim of run.claims) {
-    for (const join of claim.sources) {
-      sourceById.set(join.source.id, join.source);
-    }
-  }
-  const sources = Array.from(sourceById.values()).sort((a, b) => {
-    if (a.sourceType === "internal_crm" && b.sourceType !== "internal_crm") return 1;
-    if (b.sourceType === "internal_crm" && a.sourceType !== "internal_crm") return -1;
-    return a.title.localeCompare(b.title);
-  });
-
-  const claimsByContact = new Map<string, typeof run.claims>();
-  for (const claim of run.claims) {
-    if (!claim.contactId) continue;
-    const existing = claimsByContact.get(claim.contactId) ?? [];
-    existing.push(claim);
-    claimsByContact.set(claim.contactId, existing);
-  }
-
-  return {
-    run: {
-      id: run.id,
-      query: run.query,
-      structuredIntent: JSON.parse(run.structuredIntent) as StructuredIntent,
-      provider: run.provider,
-      status: run.status,
-      summary: run.summary,
-      executionSteps: JSON.parse(run.executionSteps) as Array<ReturnType<typeof step>>,
-      startedAt: run.startedAt,
-      completedAt: run.completedAt,
-    },
-    candidates: run.fitScores
-      .map((score) => {
-        const claims = claimsByContact.get(score.contactId) ?? [];
-        const citationIds = safeParseStringArray(score.citationsJson);
-        return {
-          contact: score.contact,
-          score: {
-            id: score.id,
-            thesisMatch: score.thesisMatch,
-            stageFit: score.stageFit,
-            geographyFit: score.geographyFit,
-            momentum: score.momentum,
-            relationship: score.relationship,
-            evidence: score.evidence,
-            overall: score.overall,
-            explanation: score.explanation,
-            weights: JSON.parse(score.weightsJson),
-            citations: citationIds,
-          },
-          claims: claims.map((claim) => ({
-            id: claim.id,
-            text: claim.text,
-            category: claim.category,
-            provenance: claim.provenance,
-            confidence: claim.confidence,
-            sourceIds: claim.sources.map((join) => join.sourceId),
-          })),
-          sources: sources.filter((source) => claims.some((claim) => claim.sources.some((join) => join.sourceId === source.id))),
-          warmPath: "Calculated from seeded relationship graph and internal CRM relationship strength.",
-        };
-      })
-      .sort((a, b) => b.score.overall - a.score.overall),
-    sources: sources.map((source) => ({
-      id: source.id,
-      title: source.title,
-      url: source.url,
-      canonicalUrl: source.canonicalUrl,
-      publisher: source.publisher,
-      domain: sourceDomain(source.url),
-      publishedAt: source.publishedAt,
-      accessedAt: source.accessedAt,
-      sourceType: source.sourceType,
-      origin: source.origin,
-      snippet: source.snippet,
-      supportsClaims: safeParseStringArray(source.supportsClaims),
-    })),
-  };
-}
-
-async function searchCandidates(prisma: PrismaClient, intent: StructuredIntent) {
-  const contacts = await getContactsWithCompanies(prisma);
-  const filtered = contacts.filter((contact) => {
-    const sector = contact.company?.sector ?? contact.sector;
-    const stage = contact.company?.stage ?? contact.stage;
-    const location = `${contact.location} ${contact.company?.headquarters ?? ""}`.toLowerCase();
-    const sectorMatch = intent.sectors.some((item) => sector.toLowerCase().includes(item.toLowerCase()) || item.toLowerCase().includes(sector.toLowerCase()));
-    const stageMatch = intent.stages.includes(stage);
-    const geographyMatch = intent.geographies.some((geo) => location.includes(geo.toLowerCase()));
-    return (sectorMatch || sector.includes("AI")) && stageMatch && geographyMatch;
-  });
-
-  if (filtered.length >= 8) return filtered.slice(0, 12);
-
-  const extras = contacts.filter((contact) => !filtered.some((candidate) => candidate.id === contact.id));
-  return [...filtered, ...extras].slice(0, 10);
-}
-
-async function upsertSource(prisma: PrismaClient, source: Parameters<typeof dedupeSources>[0][number]) {
-  const canonicalUrl = canonicalizeUrl(source.url);
-  const existing = await prisma.source.findUnique({ where: { canonicalUrl } });
-  const supportsClaims = JSON.stringify(source.supportsClaims);
-  if (existing) {
-    const mergedClaims = Array.from(new Set([...safeParseStringArray(existing.supportsClaims), ...source.supportsClaims]));
-    return prisma.source.update({
-      where: { canonicalUrl },
-      data: {
-        title: source.title,
-        publisher: source.publisher ?? existing.publisher,
-        publishedAt: source.publishedAt ? new Date(source.publishedAt) : existing.publishedAt,
-        accessedAt: new Date(source.accessedAt),
-        sourceType: source.sourceType,
-        origin: source.origin,
-        snippet: source.snippet ?? existing.snippet,
-        contactId: source.contactId ?? existing.contactId,
-        companyId: source.companyId ?? existing.companyId,
-        supportsClaims: JSON.stringify(mergedClaims),
-      },
-    });
-  }
-
-  return prisma.source.create({
-    data: {
-      title: source.title,
-      url: source.url,
-      canonicalUrl,
-      publisher: source.publisher,
-      publishedAt: source.publishedAt ? new Date(source.publishedAt) : null,
-      accessedAt: new Date(source.accessedAt),
-      sourceType: source.sourceType,
-      origin: source.origin,
-      snippet: source.snippet,
-      contactId: source.contactId,
-      companyId: source.companyId,
-      supportsClaims,
-    },
-  });
-}
-
-function safeParseStringArray(value: string) {
-  try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
-function step(label: string, status: "pending" | "running" | "complete" | "error", summary: string) {
-  return { label, status, summary };
+  return stored;
 }

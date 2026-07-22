@@ -1,67 +1,64 @@
-import { prisma } from "@/lib/prisma";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { formatTime } from "@/lib/utils";
+import { EmptyState, HeroHeader, PageFrame, Section, SignInPanel, Timestamp } from "@/components/workspace/core";
+import { getWorkspaceData } from "@/lib/workspace";
+import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
 export default async function AuditPage() {
+  const data = await getWorkspaceData();
+  if (!data.user) return <SignInPanel data={data} />;
   const events = await prisma.auditEvent.findMany({
-    include: {
-      affectedFounder: { include: { company: true } },
-      researchRun: true,
-    },
+    where: { userId: data.user.id },
+    include: { affectedContact: true, researchRun: true },
     orderBy: { timestamp: "desc" },
-    take: 80,
+    take: 100,
   });
 
   return (
-    <div className="space-y-5">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-normal">Audit Log</h1>
-        <p className="mt-2 text-sm text-muted-foreground">Inspect actions, data sources, state changes, approvals, scheduling, and fallbacks without exposing private model reasoning.</p>
-      </div>
-      <Card>
-        <CardHeader>
-          <CardTitle>Decision and Action Trace</CardTitle>
-          <CardDescription>{events.length} recent events.</CardDescription>
-        </CardHeader>
-        <CardContent className="overflow-x-auto">
-          <table className="w-full min-w-[980px] text-left text-sm">
-            <thead className="border-b border-border text-xs uppercase text-muted-foreground">
-              <tr>
-                <th className="py-3 pr-4">Timestamp</th>
-                <th className="py-3 pr-4">Actor</th>
-                <th className="py-3 pr-4">Action</th>
-                <th className="py-3 pr-4">Founder</th>
-                <th className="py-3 pr-4">Data source</th>
-                <th className="py-3 pr-4">Details</th>
-                <th className="py-3 pr-4">Score delta</th>
-              </tr>
-            </thead>
-            <tbody>
-              {events.map((event) => (
-                <tr key={event.id} className="border-b border-border align-top last:border-0">
-                  <td className="py-3 pr-4 text-xs text-muted-foreground">{formatTime(event.timestamp)}</td>
-                  <td className="py-3 pr-4">
-                    <div className="font-medium">{event.actor}</div>
-                    <div className="text-xs text-muted-foreground">{event.actorType}</div>
-                  </td>
-                  <td className="py-3 pr-4">{event.action}</td>
-                  <td className="py-3 pr-4">{event.affectedFounder?.fullName ?? "-"}</td>
-                  <td className="py-3 pr-4">
-                    <Badge variant={event.dataSource.includes("internal") ? "warning" : event.dataSource.includes("simulation") ? "muted" : "outline"}>
-                      {event.dataSource}
-                    </Badge>
-                  </td>
-                  <td className="max-w-[420px] py-3 pr-4 text-xs leading-5 text-muted-foreground">{event.details}</td>
-                  <td className="py-3 pr-4">{event.scoreDelta ?? "-"}</td>
+    <PageFrame>
+      <HeroHeader
+        eyebrow="AUDIT / OPERATIONS"
+        title="Inspect actions and outcomes."
+        body="The audit log records integration changes, sync events, research runs, scoring, draft generation, approvals, Gmail sends, Calendar writes, errors, and fallbacks without exposing private model reasoning."
+      />
+      <Section title="Action trace">
+        {events.length ? (
+          <div className="overflow-x-auto border border-border">
+            <table className="w-full min-w-[980px] text-left text-sm">
+              <thead className="border-b border-border font-mono text-[0.68rem] uppercase tracking-[0.08em] text-muted-foreground">
+                <tr>
+                  <th className="px-4 py-3">Timestamp</th>
+                  <th className="px-4 py-3">Actor</th>
+                  <th className="px-4 py-3">Action</th>
+                  <th className="px-4 py-3">Outcome</th>
+                  <th className="px-4 py-3">Contact</th>
+                  <th className="px-4 py-3">Data source</th>
+                  <th className="px-4 py-3">Details</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </CardContent>
-      </Card>
-    </div>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {events.map((event) => (
+                  <tr key={event.id} className="align-top hover:bg-muted">
+                    <td className="px-4 py-3 font-mono text-xs text-muted-foreground"><Timestamp value={event.timestamp} /></td>
+                    <td className="px-4 py-3">
+                      <p>{event.actor}</p>
+                      <p className="mt-1 font-mono text-[0.68rem] uppercase tracking-[0.08em] text-muted-foreground">{event.actorType}</p>
+                    </td>
+                    <td className="px-4 py-3">{event.action}</td>
+                    <td className="px-4 py-3"><Badge variant={event.outcome === "completed" ? "success" : "warning"}>{event.outcome}</Badge></td>
+                    <td className="px-4 py-3">{event.affectedContact?.fullName ?? event.affectedContact?.primaryEmail ?? "-"}</td>
+                    <td className="px-4 py-3">{event.dataSource ?? "-"}</td>
+                    <td className="max-w-[440px] px-4 py-3 text-xs leading-5 text-muted-foreground">{event.details ?? "-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <EmptyState title="No audit events" body="The workspace has no recorded actions yet." />
+        )}
+      </Section>
+    </PageFrame>
   );
 }

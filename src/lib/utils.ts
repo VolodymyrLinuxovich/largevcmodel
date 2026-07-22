@@ -27,7 +27,6 @@ export function formatTime(input: string | Date) {
 }
 
 export function domainFromUrl(url: string) {
-  if (url.startsWith("/")) return "local demo";
   try {
     return new URL(url).hostname.replace(/^www\./, "");
   } catch {

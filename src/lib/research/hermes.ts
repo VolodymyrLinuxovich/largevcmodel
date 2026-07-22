@@ -14,7 +14,7 @@ const hermesResultSchema = z.object({
     z.object({
       text: z.string(),
       category: z.string(),
-      provenance: z.enum(["public_source", "internal_crm", "ai_inference", "unverified"]),
+      provenance: z.enum(["public_research", "connected_account", "user_provided", "ai_inference", "unverified"]),
       confidence: z.number().min(0).max(100),
       contactId: z.string().optional().nullable(),
       companyId: z.string().optional().nullable(),
@@ -92,6 +92,7 @@ export class HermesResearchProvider implements ResearchProvider {
             accessedAt: new Date().toISOString(),
             snippet: "string optional",
             sourceType: "company|news|funding|social|database|other",
+            origin: "hermes",
             supportsClaims: ["exact supported claim"],
           },
         ],
@@ -99,7 +100,7 @@ export class HermesResearchProvider implements ResearchProvider {
           {
             text: "claim text",
             category: "string",
-            provenance: "public_source|ai_inference|unverified",
+            provenance: "public_research|ai_inference|unverified",
             confidence: 0,
             sourceUrls: ["https://..."],
           },

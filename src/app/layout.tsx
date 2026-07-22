@@ -15,7 +15,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
           <AppSidebar />
           <main className="min-w-0 flex-1">
             <MobileNav />
-            <div className="mx-auto w-full max-w-[1500px] px-4 py-5 sm:px-6 lg:px-8">{children}</div>
+            <div className="w-full">{children}</div>
           </main>
         </div>
       </body>

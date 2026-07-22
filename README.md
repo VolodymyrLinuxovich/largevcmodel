@@ -1,130 +1,152 @@
 # LargeVCModel
 
-LargeVCModel is a runnable MVP of an AI-native operating system for venture-capital relationship discovery, founder research, personalized outreach, reply tracking, and meeting scheduling.
+LargeVCModel is an AI-native operating system for venture-capital relationship intelligence. It connects a partner's real Google workspace data, research providers, investment thesis, outreach workflow, meeting workflow, and audit history into one secure application.
 
-The demo is intentionally local-first. It uses SQLite, Prisma, seeded fictional CRM data, and local demo-source pages so a partner can inspect every source used without paid services or external credentials.
+The current product is not pre-populated. It does not ship contacts, companies, meetings, replies, sources, or fabricated research. If no account is connected, the app shows integration empty states. If an account is connected and no records match, it shows an honest no-results state.
 
 ## Product Overview
 
-A VC partner can enter a request such as:
+LargeVCModel helps investors:
 
-```text
-Find strong AI infrastructure founders in the Bay Area who recently raised a seed round, explain why they fit our thesis, and draft personalized outreach.
-```
+- discover relevant founders, operators, experts, and investors from connected relationship data;
+- search existing Gmail and Google Contacts records;
+- identify warm introduction paths only when there is supporting evidence;
+- research real people and companies through Hermes or another provider adapter;
+- score opportunities against a saved investment thesis;
+- generate evidence-limited outreach drafts;
+- save approved messages to Gmail Drafts;
+- send only after explicit confirmation;
+- inspect meetings from Google Calendar;
+- preserve sources, claims, scores, and operational audit events.
 
-The app will:
-
-- parse the partner objective into structured filters;
-- search seeded CRM contacts, companies, events, and relationship edges;
-- enrich candidates through the configured research provider;
-- preserve claim-to-source provenance;
-- rank candidates with an editable heuristic score;
-- explain rankings with clickable citations;
-- draft personalized outreach in approval-required mode;
-- simulate approval, sending, replies, slot proposals, meeting booking, and CRM updates;
-- write operational decisions to the audit log.
-
-## Screenshots
-
-Screenshot placeholders:
-
-- Overview dashboard: `docs/screenshots/overview.png`
-- Research console: `docs/screenshots/research-console.png`
-- Founder profile: `docs/screenshots/founder-profile.png`
-- Relationship graph: `docs/screenshots/relationship-graph.png`
+The visual system uses a dark, editorial, institutional interface inspired by defense-technology research products: near-black backgrounds, high-contrast typography, thin dividers, rectangular controls, dense technical metadata, and restrained motion.
 
 ## Architecture
 
-The implementation follows the architecture in the original README:
+- **Framework:** Next.js App Router, React, TypeScript
+- **Styling:** Tailwind CSS with shadcn-style local UI primitives
+- **Database:** PostgreSQL through Prisma
+- **Validation:** Zod
+- **Graph:** React Flow
+- **Charts:** Recharts remains available for future real metrics
+- **Auth:** Google OAuth 2.0, signed HTTP-only session cookie
+- **Integrations:** Gmail API, People API, Google Calendar API
+- **Research:** Provider abstraction with Hermes adapter
+- **Security:** encrypted OAuth token storage, server-only secrets, user-scoped queries
 
-- **Product surface:** dashboard, research console, contacts, founder profile, relationship graph, outreach, meetings, audit log, settings.
-- **API layer:** App Router route handlers under `src/app/api`.
-- **Agent core:** deterministic domain services for intent parsing, retrieval, research orchestration, scoring, outreach, reply classification, scheduling, meeting-link creation, CRM updates, and audit logging.
-- **Data and memory:** SQLite via Prisma, with models for contacts, companies, founders, sources, claims, many-to-many claim-source links, fit scores, outreach, replies, calendar slots, meetings, and audit events.
-- **Integrations:** external email/calendar/meeting actions are simulated. Hermes is represented through a clean provider adapter.
+Core server modules:
 
-See [docs/architecture-notes.md](docs/architecture-notes.md) for implementation details.
+```text
+src/lib/auth          session cookies and current-user resolution
+src/lib/security      AES-GCM token encryption
+src/lib/google        OAuth, refresh, revocation, Gmail, People, Calendar adapters
+src/lib/research      Hermes provider interface
+src/lib/domain        scoring, source canonicalization, research persistence, outreach generation
+src/lib/workspace     user-scoped dashboard data
+src/app/api           authenticated route handlers
+```
 
 ## Local Setup
 
 ```bash
 npm install
+cp .env.example .env
+npm run db:generate
+npm run db:push
 npm run dev
 ```
 
-`npm run dev` automatically runs:
-
-```bash
-npm run db:generate
-npm run db:push
-npm run db:seed
-next dev
-```
-
-The app will be available at:
-
-```text
-http://localhost:3000
-```
+`npm run dev` starts Next.js. It does not import records or create any product data.
 
 ## Database Setup
 
-The local demo uses SQLite at:
+Create a PostgreSQL database and set:
 
-```text
-prisma/dev.db
+```env
+DATABASE_URL="postgresql://USER:PASSWORD@HOST:5432/largevcmodel"
 ```
 
-Useful commands:
+Then run:
 
 ```bash
 npm run db:generate
 npm run db:push
+```
+
+The included Prisma seed script is intentionally a no-op for product data:
+
+```bash
 npm run db:seed
 ```
 
-The seed script creates:
-
-- 12 fictional founder contacts;
-- 10 fictional demo companies;
-- 3 VC partners;
-- 4 portfolio founders or advisors;
-- relationship edges;
-- public-looking local demo-source records;
-- internal CRM claims;
-- outreach history;
-- calendar availability;
-- audit events.
-
-All fictional records are marked as demo data.
+If you add that script locally, keep generated records out of production workspaces.
 
 ## Environment Variables
 
-Copy `.env.example` if you want to configure Hermes:
-
 ```env
-RESEARCH_PROVIDER=mock
-DATABASE_URL=file:./dev.db
+DATABASE_URL=
+SESSION_SECRET=
+TOKEN_ENCRYPTION_KEY=
+NEXT_PUBLIC_APP_URL=
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+GOOGLE_REDIRECT_URI=
+RESEARCH_PROVIDER=none
 HERMES_API_URL=
 HERMES_API_KEY=
-# Optional local Hermes CLI/subprocess adapter.
-# Example: HERMES_COMMAND=hermes
-HERMES_COMMAND=
+HERMES_COMMAND=hermes
 ```
 
-Mock mode is the default and requires no credentials.
+Secrets must remain server-side. Do not expose OAuth client secrets, access tokens, refresh tokens, research API keys, or database credentials to the browser.
 
-For Vercel, the non-secret runtime database value is:
+## Google OAuth
 
-```env
-DATABASE_URL=file:/tmp/largevcmodel.db
+Create a Google OAuth 2.0 Web Client in Google Cloud Console and set the authorized redirect URI:
+
+```text
+http://localhost:3000/api/auth/google/callback
 ```
 
-The app copies `prisma/demo-template.db` into `/tmp` on cold start so serverless functions can write demo state.
+For production, also add:
+
+```text
+https://YOUR_DOMAIN/api/auth/google/callback
+```
+
+The app requests scopes by integration:
+
+- **Sign in:** `openid`, `email`, `profile`
+- **Gmail:** Gmail read access and Gmail draft/compose permissions
+- **Google Contacts:** People API contact read access
+- **Google Calendar:** event read access, free/busy access, and event write access for confirmed meeting creation
+
+Users can connect Gmail, Google Contacts, and Google Calendar independently from Settings. They can reconnect or revoke integrations. External write actions require explicit user confirmation.
+
+## Gmail Integration
+
+Gmail is used to:
+
+- index real conversation metadata and snippets;
+- link contacts to threads;
+- detect interaction recency and frequency;
+- generate drafts from available evidence;
+- save approved drafts to Gmail Drafts;
+- send a saved draft only when the user confirms;
+- classify replies from provided or imported text.
+
+The app never sends email automatically.
+
+## Google Contacts Integration
+
+Google Contacts are imported through the People API. The app normalizes names, emails, phone numbers, organizations, titles, profile images, notes, groups, and provider metadata. Contacts are deduplicated by provider IDs and primary email addresses where available. Missing fields stay unavailable.
+
+## Google Calendar Integration
+
+Google Calendar is used to import upcoming and past events, check free/busy availability, and create events only after explicit user confirmation. Calendar event links and meeting URLs come from Google Calendar responses.
 
 ## Hermes Integration
 
-The research layer uses this interface:
+Research uses this provider contract:
 
 ```ts
 interface ResearchProvider {
@@ -132,151 +154,118 @@ interface ResearchProvider {
 }
 ```
 
-Implemented providers:
+`HermesResearchProvider` supports two modes:
 
-- `MockResearchProvider`: deterministic local demo research with local demo-source pages.
-- `HermesResearchProvider`: supports both a direct HTTP adapter and a local Hermes CLI/subprocess adapter.
+- HTTP adapter using `HERMES_API_URL` and optional `HERMES_API_KEY`
+- CLI adapter using `HERMES_COMMAND`
 
-### Direct HTTP Adapter
-
-Use this when you have a stable Hermes HTTP endpoint:
+Set:
 
 ```env
 RESEARCH_PROVIDER=hermes
 HERMES_API_URL=https://your-hermes-adapter.example/research
-HERMES_API_KEY=your-token
-```
-
-The app posts a provenance-required `research_founder` task and expects strict JSON with `summary`, `sources`, `claims`, `unavailable`, and `inferred`.
-
-### Local Hermes CLI Adapter
-
-Use this when Hermes is installed locally and no stable direct HTTP API is available:
-
-```env
-RESEARCH_PROVIDER=hermes
+# or
 HERMES_COMMAND=hermes
 ```
 
-The adapter calls:
+If Hermes is not configured or fails, research runs are marked unavailable and an audit event is recorded. The application does not substitute fabricated provider results.
 
-```bash
-hermes "<provenance-required research prompt>"
-```
+## Source And Citation Design
 
-Hermes must return strict JSON matching the `ResearchResult` shape. If you use Hermes with OpenAI or OpenRouter, keep provider credentials in `~/.hermes/.env` or your shell environment, not in this repository:
+Every research source stores:
 
-```env
-OPENAI_API_KEY=...
-OPENROUTER_API_KEY=...
-```
+- title;
+- URL and canonical URL;
+- publisher/domain;
+- publication date when available;
+- access timestamp;
+- source type;
+- origin;
+- supported claims.
 
-Useful Hermes setup commands:
+Claims and sources have a many-to-many relationship. A source can support multiple claims, and a claim can cite multiple sources. The UI labels:
 
-```bash
-hermes setup
-hermes config
-hermes config set model.provider openrouter
-hermes config set model.default claude-sonnet-4
-hermes tools --set all
-hermes doctor
-```
+- connected-account information;
+- user-provided information;
+- public research;
+- AI inference;
+- unverified or unavailable facts.
 
-If Hermes is unavailable or misconfigured, the route records the fallback and uses mock research. It does not silently fabricate Hermes results.
-
-## Source and Citation Design
-
-Every research-backed claim is stored in `ResearchClaim`. Every source is stored in `Source`. Claims and sources are connected through `ClaimSource`, so:
-
-- one source can support many claims;
-- one claim can cite multiple sources;
-- citations remain clickable;
-- source panels show publisher, domain, type, publication date, accessed date, supported claims, and origin.
-
-Provenance labels:
-
-- `Internal CRM`: seeded private demo CRM data;
-- `mock`: local demo public-source artifact;
-- `hermes`: retrieved through the Hermes provider;
-- `AI inference`: model-generated conclusion based on available evidence;
-- `Unverified`: unsupported or partially unsupported claim.
-
-Mock sources are local `/demo-sources/...` pages and are clearly marked fictional.
+Local paths are rejected as research sources. Source deduplication canonicalizes public URLs by removing fragments, normalizing domains, trimming trailing slashes, and sorting query params.
 
 ## Scoring Methodology
 
-Default formula:
+Default score weights:
 
 ```text
-Overall Fit =
 30% thesis match
-20% stage/check-size compatibility
+20% stage compatibility
 15% geographic fit
-15% company momentum
+15% relationship and timing momentum
 10% relationship strength
 10% evidence quality
 ```
 
-The scoring panel lets users edit weights. The UI states that the score is a prioritization heuristic, not an objective judgment of founder quality.
+Scores are prioritization heuristics, not objective judgments. Every stored score includes the criterion breakdown, weights, confidence, missing information, date calculated, explanation, and model/provider label.
 
-## Demo Walkthrough
+## Human Approval Model
 
-Open `http://localhost:3000/research` and click **Run Demo**.
+LargeVCModel requires human confirmation for external writes:
 
-The scenario:
+- generated outreach starts as `AI_GENERATED`;
+- the user must approve the draft;
+- the user must save it to Gmail Drafts;
+- the user must explicitly confirm send;
+- Calendar events require `confirmCreate: true`.
+
+The audit log records these transitions without exposing private model reasoning.
+
+## API Routes
 
 ```text
-Find early-stage AI infrastructure founders in the Bay Area who appear relevant to a technical seed fund and have a credible reason to speak with us now.
+POST /api/query
+GET  /api/contacts/search
+POST /api/research
+POST /api/scoring
+POST /api/outreach/draft
+POST /api/outreach/approve
+POST /api/outreach/save-gmail-draft
+POST /api/outreach/send
+POST /api/replies/ingest
+GET  /api/calendar/availability
+POST /api/calendar/book
+POST /api/meetings/create
+POST /api/crm/update
+GET  /api/research/:id/sources
+GET  /api/auth/google/start
+GET  /api/auth/google/callback
+POST /api/auth/logout
+POST /api/sync/google/contacts
+POST /api/sync/google/gmail
+POST /api/sync/google/calendar
+POST /api/integrations/:id/disconnect
 ```
-
-The demo:
-
-1. parses the request;
-2. searches seeded CRM data;
-3. shows research provider progress;
-4. ranks candidates;
-5. opens citations and sources in the Sources Used panel;
-6. generates approval-required outreach;
-7. simulates partner approval;
-8. simulates a positive reply;
-9. loads available VC slots;
-10. books a mock meeting;
-11. updates CRM state and audit log.
-
-Use **Reset** in the research console to replay the scenario.
-
-## Safety and Human Approval
-
-The MVP does not send real email, LinkedIn messages, calendar invites, Zoom links, or Google Meet links.
-
-All external operations are simulated:
-
-- outreach starts as draft-only;
-- partner approval is required before simulated send;
-- reply ingestion uses sample replies;
-- scheduling uses seeded availability;
-- meeting URLs are mock `https://meet.example.com/...` links;
-- audit events record each action.
 
 ## Testing
 
 ```bash
-npm run test
 npm run typecheck
+npm run test
 npm run build
 ```
 
-Unit coverage includes:
+Current unit coverage includes:
 
 - fit scoring;
-- source canonicalization and deduplication;
+- URL canonicalization and source deduplication;
 - citation mapping;
+- rejection of local source URLs;
 - reply classification.
 
 ## Known Limitations
 
-- Hermes support is an adapter contract, not a bundled Hermes runtime.
-- Email, LinkedIn, CRM, calendar, Zoom, and Google Meet integrations are simulated.
-- Mock sources are fictional local pages for provenance demonstration.
-- The local database is reset by the seed script; do not use it for persistent production data.
-- Authentication is omitted for the local MVP.
+- Gmail body handling is intentionally conservative and stores snippets/metadata by default.
+- Relationship edges are stored, but automatic edge extraction from every synced interaction can be expanded.
+- Calendar event creation is implemented through Google Calendar; availability UI can be extended into a richer scheduler.
+- Research quality depends on the configured Hermes adapter.
+- Production deployment requires real PostgreSQL and Google OAuth environment variables.

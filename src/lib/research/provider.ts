@@ -1,12 +1,11 @@
 import type { ResearchRequest, ResearchResult } from "@/lib/domain/types";
 import { HermesResearchProvider } from "./hermes";
-import { MockResearchProvider } from "./mock";
 
 export interface ResearchProvider {
   researchFounder(input: ResearchRequest): Promise<ResearchResult>;
 }
 
-export function getConfiguredResearchProvider(): ResearchProvider {
+export function getConfiguredResearchProvider(): ResearchProvider | null {
   if (process.env.RESEARCH_PROVIDER === "hermes") {
     return new HermesResearchProvider({
       apiUrl: process.env.HERMES_API_URL,
@@ -15,22 +14,13 @@ export function getConfiguredResearchProvider(): ResearchProvider {
     });
   }
 
-  return new MockResearchProvider();
+  return null;
 }
 
-export async function researchWithFallback(input: ResearchRequest) {
+export async function researchWithConfiguredProvider(input: ResearchRequest) {
   const provider = getConfiguredResearchProvider();
-  try {
-    return await provider.researchFounder(input);
-  } catch (error) {
-    const fallback = new MockResearchProvider();
-    const result = await fallback.researchFounder(input);
-    return {
-      ...result,
-      unavailable: [
-        ...result.unavailable,
-        `Hermes provider unavailable; fell back to mock research. ${error instanceof Error ? error.message : "Unknown error"}`,
-      ],
-    };
+  if (!provider) {
+    throw new Error("No research provider is configured. Set RESEARCH_PROVIDER=hermes and configure HERMES_API_URL or HERMES_COMMAND.");
   }
+  return provider.researchFounder(input);
 }

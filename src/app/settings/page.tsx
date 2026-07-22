@@ -1,71 +1,68 @@
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { DEFAULT_SCORING_WEIGHTS } from "@/lib/domain/scoring";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { EmptyState, HeroHeader, IntegrationStatusPanel, PageFrame, Section, SignInPanel } from "@/components/workspace/core";
+import { getWorkspaceData } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
 
-export default function SettingsPage() {
-  const provider = process.env.RESEARCH_PROVIDER ?? "mock";
-  const hermesConfigured = Boolean(process.env.HERMES_API_URL);
-  const hermesCommandConfigured = Boolean(process.env.HERMES_COMMAND);
+export default async function SettingsPage() {
+  const data = await getWorkspaceData();
+  if (!data.user) return <SignInPanel data={data} />;
 
   return (
-    <div className="space-y-5">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-normal">Settings</h1>
-        <p className="mt-2 text-sm text-muted-foreground">Local demo configuration, scoring methodology, and Hermes adapter status.</p>
-      </div>
-      <section className="grid gap-4 xl:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Research Provider</CardTitle>
-            <CardDescription>Mock mode works without credentials. Hermes mode requires an adapter endpoint.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3 text-sm">
-            <div className="flex items-center justify-between rounded-md border border-border bg-white p-3">
-              <span>RESEARCH_PROVIDER</span>
-              <Badge variant={provider === "hermes" ? "success" : "muted"}>{provider}</Badge>
+    <PageFrame>
+      <HeroHeader
+        eyebrow="SETTINGS / SECURITY"
+        title="Control integrations, permissions, and scoring."
+        body="Review OAuth scopes, provider health, synchronization state, saved thesis criteria, and the human-approval model for external actions."
+        actions={
+          <form action="/api/auth/logout" method="post">
+            <Button type="submit" variant="outline">Sign out</Button>
+          </form>
+        }
+      />
+      <Section eyebrow="GOOGLE" title="Connected accounts">
+        <IntegrationStatusPanel data={data} />
+      </Section>
+      <Section eyebrow="RESEARCH" title="Provider status">
+        <div className="grid gap-3 lg:grid-cols-3">
+          <div className="border border-border p-4">
+            <p className="eyebrow">RESEARCH_PROVIDER</p>
+            <p className="mt-3 text-lg font-semibold uppercase">{data.configuration.researchProvider}</p>
+          </div>
+          <div className="border border-border p-4">
+            <p className="eyebrow">Hermes API URL</p>
+            <Badge className="mt-3" variant={process.env.HERMES_API_URL ? "success" : "warning"}>{process.env.HERMES_API_URL ? "configured" : "not configured"}</Badge>
+          </div>
+          <div className="border border-border p-4">
+            <p className="eyebrow">Hermes command</p>
+            <Badge className="mt-3" variant={process.env.HERMES_COMMAND ? "success" : "warning"}>{process.env.HERMES_COMMAND ? "configured" : "not configured"}</Badge>
+          </div>
+        </div>
+        <p className="mt-4 max-w-3xl text-sm leading-6 text-muted-foreground">
+          If Hermes is unavailable, research runs are marked unavailable and audited. The system does not fabricate replacement research.
+        </p>
+      </Section>
+      <Section eyebrow="SCORING" title="Default weighting">
+        <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+          {Object.entries(DEFAULT_SCORING_WEIGHTS).map(([key, value]) => (
+            <div key={key} className="border border-border p-4">
+              <p className="eyebrow">{key.replace(/[A-Z]/g, (match) => ` ${match.toLowerCase()}`)}</p>
+              <p className="mt-3 font-mono text-2xl">{value}%</p>
             </div>
-            <div className="flex items-center justify-between rounded-md border border-border bg-white p-3">
-              <span>HERMES_API_URL</span>
-              <Badge variant={hermesConfigured ? "success" : "warning"}>{hermesConfigured ? "configured" : "not configured"}</Badge>
-            </div>
-            <div className="flex items-center justify-between rounded-md border border-border bg-white p-3">
-              <span>HERMES_COMMAND</span>
-              <Badge variant={hermesCommandConfigured ? "success" : "warning"}>{hermesCommandConfigured ? "configured" : "not configured"}</Badge>
-            </div>
-            <p className="text-xs leading-5 text-muted-foreground">
-              `HERMES_COMMAND` can point to a local CLI such as `hermes`. When Hermes is unavailable or misconfigured, the API records a fallback and uses mock research rather than fabricating Hermes results.
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Default Scoring Formula</CardTitle>
-            <CardDescription>This is a prioritization heuristic, not an objective founder-quality score.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {Object.entries(DEFAULT_SCORING_WEIGHTS).map(([key, value]) => (
-              <div key={key} className="flex items-center justify-between rounded-md border border-border bg-white p-3 text-sm">
-                <span>{key.replace(/[A-Z]/g, (match) => ` ${match.toLowerCase()}`)}</span>
-                <Badge variant="outline">{value}%</Badge>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      </section>
-      <Card>
-        <CardHeader>
-          <CardTitle>Human Approval Model</CardTitle>
-          <CardDescription>External actions stay simulated unless real credentials are added outside the MVP.</CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-3 md:grid-cols-4">
-          {["Draft-only", "Approval required", "Simulated send", "Simulated schedule"].map((item) => (
-            <div key={item} className="rounded-md border border-border bg-white p-3 text-sm font-medium">{item}</div>
           ))}
-        </CardContent>
-      </Card>
-    </div>
+        </div>
+        <p className="mt-4 max-w-3xl text-sm leading-6 text-muted-foreground">
+          Thesis-fit scores are prioritization heuristics. Every score stores criterion-level evidence, missing information, confidence, date calculated, and provider/model metadata.
+        </p>
+      </Section>
+      <Section eyebrow="PRIVACY" title="Data controls">
+        <EmptyState
+          title="Sensitive data stays server-side"
+          body="OAuth client secrets, access tokens, refresh tokens, research keys, and database credentials are never sent to the browser. Disconnect integrations from the account cards above to revoke provider access."
+        />
+      </Section>
+    </PageFrame>
   );
 }

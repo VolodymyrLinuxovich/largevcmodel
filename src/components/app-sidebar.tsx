@@ -2,64 +2,55 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  BarChart3,
-  CalendarDays,
-  ContactRound,
-  GitBranch,
-  History,
-  MailCheck,
-  Search,
-  Settings,
-  Sparkles,
-} from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
-  { href: "/", label: "Overview", icon: BarChart3 },
-  { href: "/research", label: "Research", icon: Search },
-  { href: "/contacts", label: "Contacts", icon: ContactRound },
-  { href: "/graph", label: "Relationship Graph", icon: GitBranch },
-  { href: "/outreach", label: "Outreach", icon: MailCheck },
-  { href: "/meetings", label: "Meetings", icon: CalendarDays },
-  { href: "/audit", label: "Audit Log", icon: History },
-  { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/", label: "Overview" },
+  { href: "/research", label: "Research" },
+  { href: "/contacts", label: "Contacts" },
+  { href: "/graph", label: "Relationship Graph" },
+  { href: "/outreach", label: "Outreach" },
+  { href: "/meetings", label: "Meetings" },
+  { href: "/audit", label: "Audit Log" },
+  { href: "/settings", label: "Settings" },
 ];
 
 export function AppSidebar() {
   const pathname = usePathname();
   return (
-    <aside className="sticky top-0 hidden h-screen w-72 shrink-0 border-r border-border bg-white/85 px-4 py-5 backdrop-blur lg:block">
-      <Link href="/" className="mb-7 flex items-center gap-3 rounded-md px-2 text-foreground">
-        <span className="flex h-10 w-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
-          <Sparkles className="h-5 w-5" aria-hidden="true" />
-        </span>
-        <span>
-          <span className="block text-sm font-semibold">LargeVCModel</span>
-          <span className="block text-xs text-muted-foreground">AI-native VC OS</span>
-        </span>
-      </Link>
-      <nav className="space-y-1" aria-label="Primary">
-        {navItems.map((item) => {
+    <aside className="sticky top-0 hidden h-screen w-64 shrink-0 border-r border-border bg-background/95 lg:block">
+      <div className="border-b border-border px-5 py-5">
+        <Link href="/" className="block">
+          <span className="block text-lg font-semibold uppercase tracking-[0.08em]">LargeVCModel</span>
+          <span className="mt-1 block font-mono text-[0.65rem] uppercase tracking-[0.12em] text-muted-foreground">
+            Network Intelligence OS
+          </span>
+        </Link>
+      </div>
+      <nav className="px-0 py-3" aria-label="Primary">
+        {navItems.map((item, index) => {
           const active = pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href));
-          const Icon = item.icon;
           return (
             <Link
               key={item.href}
               href={item.href}
               className={cn(
-                "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground",
-                active && "bg-accent text-accent-foreground",
+                "group flex items-center justify-between border-b border-border px-5 py-3 font-mono text-[0.68rem] uppercase tracking-[0.12em] text-muted-foreground transition-colors hover:bg-foreground hover:text-background",
+                active && "bg-foreground text-background",
               )}
             >
-              <Icon className="h-4 w-4" aria-hidden="true" />
-              {item.label}
+              <span>{item.label}</span>
+              <span className={cn("text-muted-foreground group-hover:text-background", active && "text-background")}>
+                {String(index + 1).padStart(2, "0")}
+              </span>
             </Link>
           );
         })}
       </nav>
-      <div className="mt-8 rounded-lg border border-border bg-muted/55 p-3 text-xs leading-5 text-muted-foreground">
-        Demo mode uses seeded fictional CRM data and local demo sources. Hermes results appear only when explicitly configured.
+      <div className="absolute bottom-0 left-0 right-0 border-t border-border px-5 py-4">
+        <p className="font-mono text-[0.64rem] uppercase leading-5 tracking-[0.1em] text-muted-foreground">
+          No synthetic records. No automatic sends. No unconfirmed calendar writes.
+        </p>
       </div>
     </aside>
   );
@@ -68,25 +59,25 @@ export function AppSidebar() {
 export function MobileNav() {
   const pathname = usePathname();
   return (
-    <div className="sticky top-0 z-20 border-b border-border bg-white/90 px-3 py-3 backdrop-blur lg:hidden">
-      <div className="mb-2 flex items-center gap-2 px-1 text-sm font-semibold">
-        <Sparkles className="h-4 w-4 text-primary" aria-hidden="true" />
-        LargeVCModel
+    <div className="sticky top-0 z-20 border-b border-border bg-background/95 px-3 py-3 backdrop-blur lg:hidden">
+      <div className="mb-3 flex items-center justify-between px-1">
+        <Link href="/" className="text-sm font-semibold uppercase tracking-[0.08em]">
+          LargeVCModel
+        </Link>
+        <span className="font-mono text-[0.62rem] uppercase tracking-[0.1em] text-muted-foreground">Live Workspace</span>
       </div>
       <nav className="flex gap-2 overflow-x-auto" aria-label="Mobile primary">
         {navItems.map((item) => {
           const active = pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href));
-          const Icon = item.icon;
           return (
             <Link
               key={item.href}
               href={item.href}
               className={cn(
-                "flex shrink-0 items-center gap-2 rounded-md border border-border px-3 py-2 text-xs font-medium text-muted-foreground",
-                active && "bg-accent text-accent-foreground",
+                "shrink-0 border border-border px-3 py-2 font-mono text-[0.64rem] uppercase tracking-[0.1em] text-muted-foreground",
+                active && "bg-foreground text-background",
               )}
             >
-              <Icon className="h-3.5 w-3.5" aria-hidden="true" />
               {item.label}
             </Link>
           );

@@ -4,12 +4,13 @@ export type SourceType =
   | "funding"
   | "social"
   | "database"
-  | "internal_crm"
+  | "connected_account"
+  | "user_provided"
   | "other";
 
-export type SourceOrigin = "hermes" | "mock" | "internal_demo";
+export type SourceOrigin = "hermes" | "connected_account" | "user_provided" | "enrichment_provider";
 
-export type ClaimProvenance = "public_source" | "internal_crm" | "ai_inference" | "unverified";
+export type ClaimProvenance = "public_research" | "connected_account" | "user_provided" | "ai_inference" | "unverified";
 
 export type ResearchSourceInput = {
   title: string;
@@ -29,16 +30,16 @@ export type ResearchClaimInput = {
   text: string;
   category: string;
   provenance: ClaimProvenance;
-  confidence: number;
+  confidence?: number | null;
   contactId?: string | null;
   companyId?: string | null;
   sourceUrls?: string[];
 };
 
 export type ResearchRequest = {
-  contactId: string;
-  founderName: string;
-  companyName: string;
+  contactId?: string | null;
+  founderName?: string | null;
+  companyName?: string | null;
   companyId?: string | null;
   query: string;
   sector?: string | null;
@@ -47,7 +48,7 @@ export type ResearchRequest = {
 };
 
 export type ResearchResult = {
-  provider: "hermes" | "mock" | "hermes_cli";
+  provider: "hermes" | "hermes_cli";
   summary: string;
   sources: ResearchSourceInput[];
   claims: ResearchClaimInput[];
@@ -65,30 +66,30 @@ export type ScoringWeights = {
 };
 
 export type CandidateScoreInput = {
-  contactId: string;
-  fullName: string;
-  sector: string;
-  stage: string;
-  location: string;
-  relationshipStrength: number;
-  researchConfidence: number;
-  company?: {
-    sector: string;
-    stage: string;
-    headquarters: string;
-    latestFundingDate?: string | Date | null;
-    latestFundingRound?: string | null;
-    latestFundingAmount?: string | null;
-    checkSizeFit?: string | null;
-  } | null;
+  contactId?: string | null;
+  companyId?: string | null;
+  fullName?: string | null;
+  organization?: string | null;
+  title?: string | null;
+  sector?: string | null;
+  stage?: string | null;
+  geography?: string | null;
+  relationshipStrength?: number | null;
+  interactionCount?: number | null;
+  lastInteractionAt?: string | Date | null;
   sourceCount: number;
-  publicSourceCount: number;
   supportedClaimCount: number;
-  citationSourceIds: string[];
+  thesis?: {
+    targetSectors: string[];
+    stages: string[];
+    geographies: string[];
+    customCriteria?: unknown;
+  } | null;
 };
 
 export type CandidateScore = {
-  contactId: string;
+  contactId?: string | null;
+  companyId?: string | null;
   thesisMatch: number;
   stageFit: number;
   geographyFit: number;
@@ -96,8 +97,9 @@ export type CandidateScore = {
   relationship: number;
   evidence: number;
   overall: number;
+  confidence: number;
   explanation: string;
-  citations: string[];
+  missingInfo: string[];
   weights: ScoringWeights;
 };
 

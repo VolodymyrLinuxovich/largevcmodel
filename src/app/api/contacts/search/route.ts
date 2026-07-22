@@ -1,32 +1,31 @@
-import { prisma } from "@/lib/prisma";
+import { requireCurrentUser } from "@/lib/auth/current-user";
 import { ok, serverError } from "@/lib/api/respond";
+import { prisma } from "@/lib/prisma";
 
 export async function GET(request: Request) {
   try {
+    const user = await requireCurrentUser();
     const { searchParams } = new URL(request.url);
-    const q = (searchParams.get("q") ?? "").toLowerCase();
+    const q = (searchParams.get("q") ?? "").trim();
     const contacts = await prisma.contact.findMany({
       where: q
         ? {
+            userId: user.id,
             OR: [
-              { fullName: { contains: q } },
-              { sector: { contains: q } },
-              { location: { contains: q } },
-              { company: { name: { contains: q } } },
-              { company: { sector: { contains: q } } },
+              { fullName: { contains: q, mode: "insensitive" } },
+              { primaryEmail: { contains: q, mode: "insensitive" } },
+              { organization: { contains: q, mode: "insensitive" } },
+              { title: { contains: q, mode: "insensitive" } },
+              { notes: { contains: q, mode: "insensitive" } },
             ],
           }
-        : undefined,
+        : { userId: user.id },
       include: {
         company: true,
-        founderProfile: true,
-        fitScores: {
-          orderBy: { createdAt: "desc" },
-          take: 1,
-        },
+        fitScores: { orderBy: { calculatedAt: "desc" }, take: 1 },
       },
       orderBy: [{ relationshipStrength: "desc" }, { fullName: "asc" }],
-      take: 25,
+      take: 50,
     });
     return ok({ contacts });
   } catch (error) {

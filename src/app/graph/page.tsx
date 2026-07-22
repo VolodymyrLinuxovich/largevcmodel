@@ -1,19 +1,36 @@
-import { prisma } from "@/lib/prisma";
+import Link from "next/link";
+import { IntegrationService } from "@prisma/client";
+import { Button } from "@/components/ui/button";
 import { RelationshipGraph } from "@/components/graph/relationship-graph";
+import { EmptyState, HeroHeader, PageFrame, Section, SignInPanel } from "@/components/workspace/core";
+import { getWorkspaceData, integrationConnected } from "@/lib/workspace";
+import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
 export default async function GraphPage() {
-  const edges = await prisma.relationshipEdge.findMany({ orderBy: { strength: "desc" } });
+  const data = await getWorkspaceData();
+  if (!data.user) return <SignInPanel data={data} />;
+  const connected = integrationConnected(data, IntegrationService.GMAIL) || integrationConnected(data, IntegrationService.GOOGLE_CONTACTS) || integrationConnected(data, IntegrationService.GOOGLE_CALENDAR);
+  const edges = connected ? await prisma.relationshipEdge.findMany({ where: { userId: data.user.id }, orderBy: { strength: "desc" } }) : [];
+
   return (
-    <div className="space-y-5">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-normal">Relationship Graph</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Click any edge to see whether it came from internal CRM data, event attendance, public research, or manual entry.
-        </p>
-      </div>
-      <RelationshipGraph edges={edges} />
-    </div>
+    <PageFrame>
+      <HeroHeader
+        eyebrow="RELATIONSHIP GRAPH / EVIDENCE"
+        title="Map warm paths only when data supports them."
+        body="Edges represent Gmail communication, calendar meetings, contact records, shared organizations, or manually confirmed relationships. Unsupported relationships are not inferred."
+        actions={<Button asChild variant="outline"><Link href="/settings">Connect Sources</Link></Button>}
+      />
+      <Section title="Graph workspace">
+        {!connected ? (
+          <EmptyState title="No relationship data connected" body="Connect Gmail, Google Contacts, or Calendar to build relationship edges. The graph does not include sample nodes." />
+        ) : edges.length ? (
+          <RelationshipGraph edges={edges} />
+        ) : (
+          <EmptyState title="No relationship edges found" body="Connected records have not produced supported relationship edges yet. Sync sources or add confirmed relationships." />
+        )}
+      </Section>
+    </PageFrame>
   );
 }

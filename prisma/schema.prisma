@@ -3,185 +3,374 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
+enum IntegrationService {
+  GMAIL
+  GOOGLE_CONTACTS
+  GOOGLE_CALENDAR
+}
+
+enum IntegrationStatus {
+  CONNECTED
+  DISCONNECTED
+  SYNCING
+  ERROR
+  REVOKED
+}
+
+enum ContactSource {
+  GOOGLE_CONTACTS
+  GMAIL
+  MANUAL
+  IMPORTED_CSV
+  ENRICHMENT_PROVIDER
+}
+
+enum ResearchStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  ERROR
+  UNAVAILABLE
+}
+
+enum ClaimProvenance {
+  USER_PROVIDED
+  CONNECTED_ACCOUNT
+  PUBLIC_RESEARCH
+  AI_INFERENCE
+  UNVERIFIED
+}
+
+enum OutreachStatus {
+  AI_GENERATED
+  GMAIL_DRAFT
+  APPROVED
+  SENT
+  RECEIVED_REPLY
+  FAILED
+}
+
+enum AuditActorType {
+  USER
+  SYSTEM
+  PROVIDER
+}
+
 model User {
+  id                  String              @id @default(cuid())
+  email               String              @unique
+  name                String?
+  imageUrl            String?
+  role                String              @default("partner")
+  googleSubject       String?             @unique
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+  partnerProfile      Partner?
+  integrations        Integration[]
+  contacts            Contact[]
+  companies           Company[]
+  theses              InvestmentThesis[]
+  researchRuns        ResearchRun[]
+  sources             Source[]
+  claims              ResearchClaim[]
+  fitScores           FitScore[]
+  outreachDrafts      OutreachDraft[]
+  outreachEvents      OutreachEvent[]
+  replies             Reply[]
+  calendarEvents      CalendarEvent[]
+  calendarSlots       CalendarSlot[]
+  meetings            Meeting[]
+  relationshipEdges   RelationshipEdge[]
+  auditEvents         AuditEvent[]
+}
+
+model Partner {
   id        String   @id @default(cuid())
-  name      String
-  email     String   @unique
-  role      String
+  userId    String   @unique
+  title     String?
+  firmName  String?
+  timezone  String   @default("America/Los_Angeles")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
-model Partner {
-  id            String         @id
-  name          String
-  title         String
-  email         String         @unique
-  location      String
-  thesisFocus   String
-  avatarInitial String
-  calendarSlots CalendarSlot[]
-  meetings      Meeting[]
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
+model Integration {
+  id                       String             @id @default(cuid())
+  userId                   String
+  provider                 String             @default("google")
+  service                  IntegrationService
+  status                   IntegrationStatus  @default(CONNECTED)
+  accountEmail             String?
+  providerAccountId        String?
+  scopes                   String[]           @default([])
+  accessTokenCiphertext    String?
+  refreshTokenCiphertext   String?
+  tokenExpiresAt           DateTime?
+  syncStatus               String             @default("idle")
+  lastSyncedAt             DateTime?
+  lastError                String?
+  disconnectedAt           DateTime?
+  createdAt                DateTime           @default(now())
+  updatedAt                DateTime           @updatedAt
+  user                     User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contacts                 Contact[]
+
+  @@unique([userId, provider, service])
+  @@index([userId, status])
 }
 
 model Company {
-  id                  String          @id
-  name                String
-  slug                String          @unique
-  website             String?
-  description         String
-  sector              String
-  stage               String
-  headquarters        String
-  latestFundingRound  String?
-  latestFundingAmount String?
-  latestFundingDate   DateTime?
-  checkSizeFit        String
-  demoData            Boolean         @default(true)
-  contacts            Contact[]
-  founderProfiles     FounderProfile[]
-  claims              ResearchClaim[]
-  sources             Source[]
-  createdAt           DateTime        @default(now())
-  updatedAt           DateTime        @updatedAt
+  id             String          @id @default(cuid())
+  userId         String
+  name           String
+  domain         String?
+  website        String?
+  description    String?
+  sector         String?
+  stage          String?
+  geography      String?
+  businessModel  String?
+  source         String          @default("user")
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contacts       Contact[]
+  claims         ResearchClaim[]
+  sources        Source[]
+  fitScores      FitScore[]
+
+  @@unique([userId, name])
+  @@index([userId, domain])
 }
 
 model Contact {
-  id                   String           @id
-  fullName             String
-  email                String?          @unique
-  linkedInUrl          String?
-  role                 String
-  location             String
-  sector               String
-  stage                String
-  checkSizeMin         Int?
-  checkSizeMax         Int?
-  relationshipStrength Int              @default(0)
-  researchConfidence   Int              @default(60)
-  crmStatus            String           @default("New Lead")
-  sourceLabel          String           @default("Internal CRM")
-  dataBoundary         String           @default("Seeded fictional demo data")
-  companyId            String?
-  company              Company?         @relation(fields: [companyId], references: [id])
-  founderProfile       FounderProfile?
-  claims               ResearchClaim[]
-  sources              Source[]
-  fitScores            FitScore[]
-  outreachDrafts       OutreachDraft[]
-  outreachEvents       OutreachEvent[]
-  replies              Reply[]
-  meetings             Meeting[]
-  auditEvents          AuditEvent[]
-  createdAt            DateTime         @default(now())
-  updatedAt            DateTime         @updatedAt
+  id                    String             @id @default(cuid())
+  userId                String
+  sourceIntegrationId   String?
+  source                ContactSource
+  providerId            String?
+  fullName              String?
+  primaryEmail          String?
+  emails                String[]           @default([])
+  phones                String[]           @default([])
+  organization          String?
+  title                 String?
+  profileImageUrl       String?
+  notes                 String?
+  groups                String[]           @default([])
+  tags                  String[]           @default([])
+  metadata              Json?
+  companyId             String?
+  relationshipStrength  Int?
+  lastInteractionAt     DateTime?
+  interactionCount      Int                @default(0)
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+  user                  User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sourceIntegration     Integration?       @relation(fields: [sourceIntegrationId], references: [id], onDelete: SetNull)
+  company               Company?           @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  gmailThreads          GmailThread[]
+  calendarEvents        CalendarEvent[]
+  claims                ResearchClaim[]
+  sources               Source[]
+  fitScores             FitScore[]
+  outreachDrafts        OutreachDraft[]
+  outreachEvents        OutreachEvent[]
+  replies               Reply[]
+  meetings              Meeting[]
+  auditEvents           AuditEvent[]
+
+  @@unique([userId, source, providerId])
+  @@unique([userId, primaryEmail])
+  @@index([userId, fullName])
+  @@index([userId, lastInteractionAt])
 }
 
-model FounderProfile {
-  id                  String   @id
-  contactId           String   @unique
-  companyId           String
-  summary             String
-  companyDescription  String
-  thesisFit           String
-  concerns            String
-  pastInteractions    String
-  outreachHistoryText String
-  contact             Contact  @relation(fields: [contactId], references: [id])
-  company             Company  @relation(fields: [companyId], references: [id])
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+model GmailThread {
+  id               String         @id @default(cuid())
+  userId           String
+  contactId        String?
+  providerThreadId String
+  subject          String?
+  snippet          String?
+  historyId        String?
+  threadUrl        String?
+  labels           String[]       @default([])
+  messageCount     Int            @default(0)
+  lastMessageAt    DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  contact          Contact?       @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  messages         GmailMessage[]
+  outreachDrafts   OutreachDraft[]
+
+  @@unique([userId, providerThreadId])
+  @@index([userId, lastMessageAt])
+}
+
+model GmailMessage {
+  id                String      @id @default(cuid())
+  threadId          String
+  providerMessageId String
+  direction         String
+  fromEmail         String?
+  toEmails          String[]    @default([])
+  ccEmails          String[]    @default([])
+  subject           String?
+  snippet           String?
+  internalDate      DateTime?
+  messageUrl        String?
+  createdAt         DateTime    @default(now())
+  thread            GmailThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@unique([threadId, providerMessageId])
+}
+
+model CalendarEvent {
+  id              String    @id @default(cuid())
+  userId          String
+  contactId       String?
+  providerEventId String
+  calendarId      String    @default("primary")
+  title           String?
+  description     String?
+  location        String?
+  htmlLink        String?
+  meetingUrl      String?
+  attendees       String[]  @default([])
+  startsAt        DateTime
+  endsAt          DateTime
+  status          String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contact         Contact?  @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  meeting         Meeting?
+
+  @@unique([userId, calendarId, providerEventId])
+  @@index([userId, startsAt])
 }
 
 model InvestmentThesis {
-  id           String   @id
-  name         String
-  description  String
-  sectors      String
-  stages       String
-  geographies  String
-  checkSizeMin Int
-  checkSizeMax Int
-  active       Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id                       String     @id @default(cuid())
+  userId                   String
+  name                     String
+  targetSectors            String[]   @default([])
+  stages                   String[]   @default([])
+  geographies              String[]   @default([])
+  checkSizeMin             Int?
+  checkSizeMax             Int?
+  businessModels           String[]   @default([])
+  technicalRequirements    String?
+  founderCharacteristics   String?
+  exclusionCriteria        String?
+  customCriteria           Json?
+  active                   Boolean    @default(true)
+  createdAt                DateTime   @default(now())
+  updatedAt                DateTime   @updatedAt
+  user                     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fitScores                FitScore[]
+
+  @@index([userId, active])
 }
 
 model RelationshipEdge {
-  id              String   @id
+  id              String   @id @default(cuid())
+  userId          String
   fromNodeId      String
-  fromNodeLabel   String
+  fromNodeLabel   String?
   fromNodeType    String
   toNodeId        String
-  toNodeLabel     String
+  toNodeLabel     String?
   toNodeType      String
   relationship    String
   strength        Int
   evidence        String
-  sourceType      String
-  sourceId        String?
+  source          String
+  sourceRecordId  String?
   createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, strength])
+  @@unique([userId, fromNodeId, toNodeId, relationship, source])
 }
 
 model ResearchRun {
-  id                String          @id @default(cuid())
-  query             String
-  structuredIntent  String
-  provider          String
-  status            String
-  summary           String
-  executionSteps    String
-  startedAt         DateTime        @default(now())
-  completedAt       DateTime?
-  claims            ResearchClaim[]
-  fitScores         FitScore[]
-  outreachDrafts    OutreachDraft[]
-  auditEvents       AuditEvent[]
-  createdAt         DateTime        @default(now())
-  updatedAt         DateTime        @updatedAt
+  id              String           @id @default(cuid())
+  userId          String
+  query           String
+  subjectType     String?
+  subjectId       String?
+  provider        String
+  status          ResearchStatus   @default(PENDING)
+  structuredInput Json?
+  summary         String?
+  modelOrProvider String?
+  startedAt       DateTime         @default(now())
+  completedAt     DateTime?
+  error           String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  claims          ResearchClaim[]
+  fitScores       FitScore[]
+  auditEvents     AuditEvent[]
+
+  @@index([userId, createdAt])
+  @@index([userId, status])
 }
 
 model ResearchClaim {
-  id           String        @id @default(cuid())
+  id            String          @id @default(cuid())
+  userId        String
   researchRunId String?
-  contactId    String?
-  companyId    String?
-  text         String
-  category     String
-  provenance   String
-  confidence   Int
-  researchRun  ResearchRun?  @relation(fields: [researchRunId], references: [id])
-  contact      Contact?      @relation(fields: [contactId], references: [id])
-  company      Company?      @relation(fields: [companyId], references: [id])
-  sources      ClaimSource[]
-  createdAt    DateTime      @default(now())
+  contactId     String?
+  companyId     String?
+  text          String
+  category      String
+  provenance    ClaimProvenance
+  confidence    Int?
+  extractedAt   DateTime        @default(now())
+  createdAt     DateTime        @default(now())
+  user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  researchRun   ResearchRun?    @relation(fields: [researchRunId], references: [id], onDelete: SetNull)
+  contact       Contact?        @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  company       Company?        @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  sources       ClaimSource[]
+
+  @@index([userId, provenance])
 }
 
 model Source {
   id             String        @id @default(cuid())
+  userId         String
+  contactId      String?
+  companyId      String?
   title          String
   url            String
-  canonicalUrl   String        @unique
+  canonicalUrl   String
   publisher      String?
   publishedAt    DateTime?
   accessedAt     DateTime
   sourceType     String
   origin         String
   snippet        String?
-  contactId      String?
-  companyId      String?
-  supportsClaims String
-  contact        Contact?      @relation(fields: [contactId], references: [id])
-  company        Company?      @relation(fields: [companyId], references: [id])
-  claims         ClaimSource[]
+  supportsClaims String[]      @default([])
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contact        Contact?      @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  company        Company?      @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  claims         ClaimSource[]
+
+  @@unique([userId, canonicalUrl])
+  @@index([userId, sourceType])
 }
 
 model ClaimSource {
@@ -189,114 +378,152 @@ model ClaimSource {
   claimId        String
   sourceId       String
   supportedClaim String
-  claim          ResearchClaim @relation(fields: [claimId], references: [id])
-  source         Source        @relation(fields: [sourceId], references: [id])
+  claim          ResearchClaim @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  source         Source        @relation(fields: [sourceId], references: [id], onDelete: Cascade)
 
   @@unique([claimId, sourceId])
 }
 
 model FitScore {
-  id             String      @id @default(cuid())
-  researchRunId  String?
-  contactId      String
-  thesisMatch    Int
-  stageFit       Int
-  geographyFit   Int
-  momentum       Int
-  relationship   Int
-  evidence       Int
-  overall        Int
-  explanation    String
-  weightsJson    String
-  citationsJson  String
-  researchRun    ResearchRun? @relation(fields: [researchRunId], references: [id])
-  contact        Contact      @relation(fields: [contactId], references: [id])
-  createdAt      DateTime     @default(now())
+  id              String            @id @default(cuid())
+  userId          String
+  contactId       String?
+  companyId       String?
+  thesisId        String?
+  researchRunId   String?
+  overall         Int
+  confidence      Int
+  criteria        Json
+  weights         Json
+  evidence        Json?
+  missingInfo     String[]          @default([])
+  explanation     String
+  modelOrProvider String
+  calculatedAt    DateTime          @default(now())
+  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contact         Contact?          @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  company         Company?          @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  thesis          InvestmentThesis? @relation(fields: [thesisId], references: [id], onDelete: SetNull)
+  researchRun     ResearchRun?      @relation(fields: [researchRunId], references: [id], onDelete: SetNull)
+
+  @@index([userId, calculatedAt])
 }
 
 model OutreachDraft {
-  id            String          @id @default(cuid())
-  contactId     String
-  researchRunId String?
-  format        String
-  tone          String
-  version       String
-  subject       String
-  body          String
-  rationale     String
-  status        String          @default("Draft")
-  approvedAt    DateTime?
-  sentAt        DateTime?
-  contact       Contact         @relation(fields: [contactId], references: [id])
-  researchRun   ResearchRun?    @relation(fields: [researchRunId], references: [id])
-  events        OutreachEvent[]
-  replies       Reply[]
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
+  id                String          @id @default(cuid())
+  userId            String
+  contactId         String
+  gmailThreadId     String?
+  gmailDraftId      String?
+  gmailMessageId    String?
+  format            String          @default("email")
+  goal              String
+  tone              String          @default("direct")
+  subject           String
+  body              String
+  rationale         String?
+  evidenceSourceIds String[]        @default([])
+  status            OutreachStatus  @default(AI_GENERATED)
+  approvedAt        DateTime?
+  sentAt            DateTime?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  user              User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contact           Contact         @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  gmailThread       GmailThread?    @relation(fields: [gmailThreadId], references: [id], onDelete: SetNull)
+  events            OutreachEvent[]
+  replies           Reply[]
+
+  @@index([userId, status])
 }
 
 model OutreachEvent {
   id        String         @id @default(cuid())
+  userId    String
   draftId   String?
   contactId String?
   type      String
   actor     String
-  note      String
+  note      String?
   timestamp DateTime       @default(now())
-  draft     OutreachDraft? @relation(fields: [draftId], references: [id])
-  contact   Contact?       @relation(fields: [contactId], references: [id])
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  draft     OutreachDraft? @relation(fields: [draftId], references: [id], onDelete: SetNull)
+  contact   Contact?       @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  @@index([userId, timestamp])
 }
 
 model Reply {
   id                  String         @id @default(cuid())
-  contactId           String
+  userId              String
+  contactId           String?
   draftId             String?
-  body                String
+  gmailMessageId      String?
+  bodySnippet         String
   classification      String
   confidence          Int
   requiresHumanReview Boolean        @default(false)
-  createdAt           DateTime       @default(now())
-  contact             Contact        @relation(fields: [contactId], references: [id])
-  draft               OutreachDraft? @relation(fields: [draftId], references: [id])
+  receivedAt          DateTime       @default(now())
+  user                User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contact             Contact?       @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  draft               OutreachDraft? @relation(fields: [draftId], references: [id], onDelete: SetNull)
+
+  @@index([userId, receivedAt])
 }
 
 model CalendarSlot {
-  id        String   @id
-  partnerId String
-  startTime DateTime
-  endTime   DateTime
+  id        String   @id @default(cuid())
+  userId    String
+  startsAt  DateTime
+  endsAt    DateTime
   timezone  String
+  source    String   @default("google_calendar")
   status    String   @default("available")
-  label     String
-  partner   Partner  @relation(fields: [partnerId], references: [id])
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, startsAt])
 }
 
 model Meeting {
-  id         String   @id @default(cuid())
-  contactId  String
-  partnerId  String?
-  title      String
-  startTime  DateTime
-  endTime    DateTime
-  meetingUrl String
-  status     String   @default("Booked")
-  contact    Contact  @relation(fields: [contactId], references: [id])
-  partner    Partner? @relation(fields: [partnerId], references: [id])
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id              String         @id @default(cuid())
+  userId          String
+  contactId       String?
+  calendarEventId String?        @unique
+  title           String
+  startsAt        DateTime
+  endsAt          DateTime
+  meetingUrl      String?
+  status          String
+  objective       String?
+  preparation     String?
+  notes           String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contact         Contact?       @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  calendarEvent   CalendarEvent? @relation(fields: [calendarEventId], references: [id], onDelete: SetNull)
+
+  @@index([userId, startsAt])
 }
 
 model AuditEvent {
-  id                String       @id @default(cuid())
+  id                String         @id @default(cuid())
+  userId            String?
+  actorType         AuditActorType
   actor             String
-  actorType         String
   action            String
-  timestamp         DateTime     @default(now())
-  affectedFounderId String?
-  dataSource        String
-  details           String
+  outcome           String
+  affectedContactId String?
+  dataSource        String?
+  details           String?
+  metadata          Json?
   scoreDelta        String?
   researchRunId     String?
-  affectedFounder   Contact?     @relation(fields: [affectedFounderId], references: [id])
-  researchRun       ResearchRun?  @relation(fields: [researchRunId], references: [id])
+  timestamp         DateTime       @default(now())
+  user              User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  affectedContact   Contact?       @relation(fields: [affectedContactId], references: [id], onDelete: SetNull)
+  researchRun       ResearchRun?   @relation(fields: [researchRunId], references: [id], onDelete: SetNull)
+
+  @@index([userId, timestamp])
 }

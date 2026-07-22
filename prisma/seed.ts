@@ -1,11 +1,10 @@
 import { PrismaClient } from "@prisma/client";
-import { resetDemoData } from "../src/lib/demo/reset";
 
 const prisma = new PrismaClient();
 
 async function main() {
-  const result = await resetDemoData(prisma);
-  console.log(`Seeded LargeVCModel demo: ${result.contacts} contacts, ${result.companies} companies, ${result.sources} sources.`);
+  await prisma.$connect();
+  console.log("LargeVCModel has no seed data. Connect Google integrations to import real workspace records.");
 }
 
 main()

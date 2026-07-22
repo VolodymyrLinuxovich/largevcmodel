@@ -3,12 +3,7 @@ import type { ResearchSourceInput } from "./types";
 
 export const sourceInputSchema = z.object({
   title: z.string().min(2),
-  url: z
-    .string()
-    .min(1)
-    .refine((value) => value.startsWith("/demo-sources/") || /^https?:\/\//.test(value), {
-      message: "Source URL must be http(s) or a local /demo-sources path",
-    }),
+  url: z.string().url({ message: "Source URL must be a valid public http(s) URL" }),
   publisher: z.string().optional().nullable(),
   publishedAt: z.union([z.string(), z.date()]).optional().nullable(),
   accessedAt: z.union([z.string(), z.date()]),
@@ -21,10 +16,6 @@ export const sourceInputSchema = z.object({
 });
 
 export function canonicalizeUrl(url: string) {
-  if (url.startsWith("/")) {
-    return url.replace(/\/+$/, "").toLowerCase();
-  }
-
   const parsed = new URL(url);
   parsed.hash = "";
   parsed.hostname = parsed.hostname.replace(/^www\./, "").toLowerCase();
@@ -38,25 +29,22 @@ export function dedupeSources<T extends ResearchSourceInput>(sources: T[]): T[] 
   for (const source of sources) {
     const parsed = sourceInputSchema.parse(source);
     const canonical = canonicalizeUrl(parsed.url);
-    if (!seen.has(canonical)) {
+    const existing = seen.get(canonical);
+    if (!existing) {
       seen.set(canonical, { ...source, url: parsed.url });
       continue;
     }
 
-    const existing = seen.get(canonical);
-    if (existing) {
-      seen.set(canonical, {
-        ...existing,
-        supportsClaims: Array.from(new Set([...existing.supportsClaims, ...source.supportsClaims])),
-        snippet: existing.snippet ?? source.snippet,
-      });
-    }
+    seen.set(canonical, {
+      ...existing,
+      supportsClaims: Array.from(new Set([...existing.supportsClaims, ...source.supportsClaims])),
+      snippet: existing.snippet ?? source.snippet,
+    });
   }
   return Array.from(seen.values());
 }
 
 export function sourceDomain(url: string) {
-  if (url.startsWith("/")) return "local demo";
   try {
     return new URL(url).hostname.replace(/^www\./, "");
   } catch {

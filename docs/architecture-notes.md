@@ -1,105 +1,77 @@
 # Architecture Notes
 
-## Directory Map
+LargeVCModel is now structured as a user-scoped, integration-first product. It does not create product records without a connected account or explicit user action.
 
-```text
-src/app
-  api/                  Route handlers for query, research, scoring, outreach, replies, calendar, meetings, CRM, demo reset
-  audit/                Audit log page
-  contacts/             Contact table and founder profile pages
-  demo-sources/         Local fictional source pages used by mock research
-  graph/                Relationship graph page
-  meetings/             Reply and scheduling overview
-  outreach/             Outreach studio
-  research/             Partner research console
-  settings/             Provider and scoring settings
+## Runtime Boundaries
 
-src/components
-  dashboard/            Recharts dashboard components
-  graph/                React Flow relationship graph
-  outreach/             Outreach workflow UI
-  research/             Candidate cards, source panel, research console, founder actions
-  ui/                   Lightweight shadcn-style primitives
+- Server Components render authenticated workspace pages.
+- Route handlers perform provider operations and enforce user ownership.
+- Client components handle interactive actions such as research queries and approved provider writes.
+- Secrets and provider tokens remain server-side.
 
-src/lib
-  api/                  JSON response helpers
-  demo/                 Fixtures and reset/seed orchestration
-  domain/               Intent parsing, source utilities, scoring, replies, outreach, research service
-  research/             ResearchProvider, HermesResearchProvider, MockResearchProvider
-  prisma.ts             Prisma singleton
-```
+## Data Model
 
-## API Operations
+The Prisma schema uses PostgreSQL and models:
 
-Implemented route handlers:
+- `User`, `Partner`
+- `Integration`
+- `Contact`, `Company`
+- `GmailThread`, `GmailMessage`
+- `CalendarEvent`, `CalendarSlot`, `Meeting`
+- `InvestmentThesis`
+- `RelationshipEdge`
+- `ResearchRun`, `ResearchClaim`, `Source`, `ClaimSource`
+- `FitScore`
+- `OutreachDraft`, `OutreachEvent`, `Reply`
+- `AuditEvent`
 
-```text
-POST /api/query
-GET  /api/contacts/search
-POST /api/research
-POST /api/scoring
-POST /api/outreach/draft
-POST /api/outreach/approve
-POST /api/outreach/send
-POST /api/replies/ingest
-GET  /api/calendar/availability
-POST /api/calendar/book
-POST /api/meetings/create
-POST /api/crm/update
-GET  /api/research/:id/sources
-POST /api/demo/reset
-```
+Claims and sources are many-to-many through `ClaimSource`.
 
-## Data Provenance
+## Integrations
 
-Important factual statements are stored as `ResearchClaim` rows. Each claim has:
+Google integration modules live in `src/lib/google`:
 
-- category;
-- provenance;
-- confidence;
-- optional contact and company;
-- zero or more supporting sources through `ClaimSource`.
+- `oauth.ts` builds authorization URLs, exchanges codes, refreshes tokens, revokes access, and reads userinfo.
+- `api.ts` resolves encrypted credentials, refreshes tokens, handles provider failures, and wraps authenticated Google fetches.
+- `contacts.ts` imports People API connection records.
+- `gmail.ts` imports Gmail metadata/snippets and creates/sends drafts only through explicit route calls.
+- `calendar.ts` imports Calendar events, checks free/busy, and creates events after confirmation.
 
-Sources are deduplicated by canonical URL before linking. Mock public sources use local `/demo-sources/...` URLs and are labeled as demo sources.
+## Research
 
-## Research Provider Flow
+Research provider code lives in `src/lib/research`.
 
-`executeResearchQuery` coordinates:
+`HermesResearchProvider` can call an HTTP adapter or local CLI command. Provider failures produce an unavailable research run and audit event. No fallback provider fabricates public research.
 
-1. `parsePartnerIntent`
-2. seeded CRM candidate filtering
-3. `researchWithFallback`
-4. source canonicalization and upsert
-5. claim creation and claim-source linking
-6. fit scoring
-7. audit event creation
-8. response payload construction
+## Provenance
 
-`HermesResearchProvider` supports two integration paths:
+Source URLs must be public URLs. They are canonicalized and deduplicated before storage. Each claim records provenance:
 
-- `HERMES_API_URL`: direct HTTP adapter.
-- `HERMES_COMMAND`: local CLI/subprocess adapter, for example `hermes`.
+- `USER_PROVIDED`
+- `CONNECTED_ACCOUNT`
+- `PUBLIC_RESEARCH`
+- `AI_INFERENCE`
+- `UNVERIFIED`
 
-Both paths expect Hermes or a wrapper adapter to return JSON with `summary`, `sources`, `claims`, `unavailable`, and `inferred`. The CLI path sends a single provenance-required prompt to Hermes and parses the JSON response. Credentials stay outside the repo in `~/.hermes/.env` or the shell environment.
+The UI keeps source links, supported claims, publisher/domain, source type, origin, and publication/access dates visible.
 
-## Scoring
+## Approval And Writes
 
-`calculateFitScore` is deterministic and testable. It combines:
+Provider writes are explicit:
 
-- sector match;
-- stage match;
-- Bay Area geography;
-- recency of funding;
-- relationship strength;
-- source and claim evidence quality.
+- Gmail drafts are created only after a user approves an AI-generated draft.
+- Gmail sends require a saved draft and `confirmSend: true`.
+- Google Calendar creates require `confirmCreate: true`.
 
-The result includes component scores, total score, explanation, citations, and weights.
+Every write path records an `AuditEvent`.
 
-## Demo State
+## Deployment
 
-`resetDemoData` is shared by:
+Vercel deployment requires project environment variables for:
 
-- `prisma/seed.ts`
-- `POST /api/demo/reset`
+- Postgres `DATABASE_URL`
+- session and token encryption secrets
+- Google OAuth client ID/secret/redirect URI
+- optional Hermes provider configuration
 
-That keeps command-line seeding and the in-app Reset button deterministic.
+Without those variables, the app remains configuration-gated and will not synthesize product data.
