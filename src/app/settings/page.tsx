@@ -26,16 +26,16 @@ export default async function SettingsPage() {
         <IntegrationStatusPanel data={data} />
       </Section>
       <Section eyebrow="RESEARCH" title="Provider status">
-        <div className="grid gap-3 lg:grid-cols-3">
-          <div className="border border-border p-4">
+        <div className="grid border-y border-border lg:grid-cols-3">
+          <div className="border-b border-border py-5 lg:border-b-0 lg:border-r lg:pr-6">
             <p className="eyebrow">RESEARCH_PROVIDER</p>
             <p className="mt-3 text-lg font-semibold uppercase">{data.configuration.researchProvider}</p>
           </div>
-          <div className="border border-border p-4">
+          <div className="border-b border-border py-5 lg:border-b-0 lg:border-r lg:px-6">
             <p className="eyebrow">Hermes API URL</p>
             <Badge className="mt-3" variant={process.env.HERMES_API_URL ? "success" : "warning"}>{process.env.HERMES_API_URL ? "configured" : "not configured"}</Badge>
           </div>
-          <div className="border border-border p-4">
+          <div className="py-5 lg:pl-6">
             <p className="eyebrow">Hermes command</p>
             <Badge className="mt-3" variant={process.env.HERMES_COMMAND ? "success" : "warning"}>{process.env.HERMES_COMMAND ? "configured" : "not configured"}</Badge>
           </div>
@@ -45,9 +45,9 @@ export default async function SettingsPage() {
         </p>
       </Section>
       <Section eyebrow="SCORING" title="Default weighting">
-        <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <div className="grid border-y border-border md:grid-cols-3 xl:grid-cols-6">
           {Object.entries(DEFAULT_SCORING_WEIGHTS).map(([key, value]) => (
-            <div key={key} className="border border-border p-4">
+            <div key={key} className="border-b border-border py-5 md:border-r xl:border-b-0 xl:last:border-r-0 md:odd:pr-6 md:even:px-6">
               <p className="eyebrow">{key.replace(/[A-Z]/g, (match) => ` ${match.toLowerCase()}`)}</p>
               <p className="mt-3 font-mono text-2xl">{value}%</p>
             </div>

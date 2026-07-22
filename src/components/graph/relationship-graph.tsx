@@ -24,9 +24,10 @@ export function RelationshipGraph({ edges, focusNodeId }: { edges: RelationshipE
   const { nodes, flowEdges } = useMemo(() => buildGraph(edges, focusNodeId), [edges, focusNodeId]);
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
-      <div className="h-[560px] border border-border">
+    <div className="grid gap-8 xl:grid-cols-[1fr_360px]">
+      <div className="h-[560px] border-y border-border">
         <ReactFlow
+          className="lvc-flow bg-background"
           nodes={nodes}
           edges={flowEdges}
           fitView
@@ -38,10 +39,10 @@ export function RelationshipGraph({ edges, focusNodeId }: { edges: RelationshipE
           proOptions={{ hideAttribution: true }}
         >
           <Background gap={24} color="rgba(255,255,255,0.12)" />
-          <Controls />
+          <Controls className="lvc-flow-controls" />
         </ReactFlow>
       </div>
-      <aside className="border border-border">
+      <aside className="border-y border-border">
         <div className="border-b border-border p-4">
           <p className="eyebrow mb-2">EDGE EVIDENCE</p>
           <h2 className="text-sm font-semibold uppercase tracking-[0.08em]">Relationship basis</h2>
@@ -59,7 +60,7 @@ export function RelationshipGraph({ edges, focusNodeId }: { edges: RelationshipE
                 <Badge variant="outline">strength {selected.strength}</Badge>
                 <Badge variant="muted">{selected.source}</Badge>
               </div>
-              <p className="border border-border p-3 text-sm leading-6">{selected.evidence}</p>
+              <p className="border-y border-border py-3 text-sm leading-6">{selected.evidence}</p>
             </div>
           ) : (
             <p className="text-sm text-muted-foreground">Select an edge to inspect provenance.</p>

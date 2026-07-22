@@ -24,7 +24,7 @@ export default async function AuditPage() {
       />
       <Section title="Action trace">
         {events.length ? (
-          <div className="overflow-x-auto border border-border">
+          <div className="overflow-x-auto border-y border-border">
             <table className="w-full min-w-[980px] text-left text-sm">
               <thead className="border-b border-border font-mono text-[0.68rem] uppercase tracking-[0.08em] text-muted-foreground">
                 <tr>
@@ -39,7 +39,7 @@ export default async function AuditPage() {
               </thead>
               <tbody className="divide-y divide-border">
                 {events.map((event) => (
-                  <tr key={event.id} className="align-top hover:bg-muted">
+                  <tr key={event.id} className="align-top transition-colors hover:text-primary">
                     <td className="px-4 py-3 font-mono text-xs text-muted-foreground"><Timestamp value={event.timestamp} /></td>
                     <td className="px-4 py-3">
                       <p>{event.actor}</p>

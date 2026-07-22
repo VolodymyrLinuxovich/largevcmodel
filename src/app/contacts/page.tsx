@@ -56,7 +56,7 @@ export default async function ContactsPage({ searchParams }: { searchParams: Pro
         {!connected ? (
           <EmptyState title="No contact source connected" body="Connect Google Contacts or Gmail to populate the contact index. LargeVCModel will not create sample contacts." action={<Button asChild><Link href="/settings">Connect Sources</Link></Button>} />
         ) : contacts.length ? (
-          <div className="overflow-x-auto border border-border">
+          <div className="overflow-x-auto border-y border-border">
             <table className="w-full min-w-[920px] text-left text-sm">
               <thead className="border-b border-border font-mono text-[0.68rem] uppercase tracking-[0.08em] text-muted-foreground">
                 <tr>
@@ -72,7 +72,7 @@ export default async function ContactsPage({ searchParams }: { searchParams: Pro
               </thead>
               <tbody className="divide-y divide-border">
                 {contacts.map((contact) => (
-                  <tr key={contact.id} className="hover:bg-muted">
+                  <tr key={contact.id} className="transition-colors hover:text-primary">
                     <td className="px-4 py-3">
                       <Link href={`/contacts/${contact.id}`} className="font-semibold underline-offset-4 hover:underline">
                         {contact.fullName ?? "Unnamed contact"}

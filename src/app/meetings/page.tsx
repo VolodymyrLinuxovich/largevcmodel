@@ -47,9 +47,9 @@ export default async function MeetingsPage() {
           {!calendarConnected ? (
             <EmptyState title="Calendar not connected" body="Connect Google Calendar to display real upcoming meetings." />
           ) : upcoming.length ? (
-            <div className="space-y-3">
+            <div className="divide-y divide-border border-y border-border">
               {upcoming.map((event) => (
-                <a key={event.id} href={event.htmlLink ?? undefined} target="_blank" rel="noreferrer" className="block border border-border p-4 hover:bg-muted">
+                <a key={event.id} href={event.htmlLink ?? undefined} target="_blank" rel="noreferrer" className="block py-4 transition-colors hover:text-primary">
                   <div className="flex items-start justify-between gap-4">
                     <p className="text-sm font-semibold">{event.title ?? "Calendar event"}</p>
                     <Badge variant={event.meetingUrl ? "success" : "muted"}>{event.meetingUrl ? "meet link" : "no meet link"}</Badge>
@@ -70,9 +70,9 @@ export default async function MeetingsPage() {
           {!calendarConnected ? (
             <EmptyState title="Calendar not connected" body="Connect and sync Calendar to inspect meeting history." />
           ) : past.length ? (
-            <div className="space-y-3">
+            <div className="divide-y divide-border border-y border-border">
               {past.slice(0, 12).map((event) => (
-                <a key={event.id} href={event.htmlLink ?? undefined} target="_blank" rel="noreferrer" className="block border border-border p-4 hover:bg-muted">
+                <a key={event.id} href={event.htmlLink ?? undefined} target="_blank" rel="noreferrer" className="block py-4 transition-colors hover:text-primary">
                   <p className="text-sm font-semibold">{event.title ?? "Calendar event"}</p>
                   <p className="mt-2 font-mono text-[0.7rem] uppercase tracking-[0.08em] text-muted-foreground"><Timestamp value={event.startsAt} /></p>
                 </a>
@@ -85,9 +85,9 @@ export default async function MeetingsPage() {
       </section>
       <Section eyebrow="REPLIES" title="Recent reply classification">
         {replies.length ? (
-          <div className="divide-y divide-border border border-border">
+          <div className="divide-y divide-border border-y border-border">
             {replies.map((reply) => (
-              <div key={reply.id} className="grid gap-3 px-4 py-4 md:grid-cols-[1fr_180px_160px]">
+              <div key={reply.id} className="grid gap-3 py-4 md:grid-cols-[1fr_180px_160px]">
                 <p className="text-sm leading-6">{reply.bodySnippet}</p>
                 <Badge variant={reply.requiresHumanReview ? "warning" : "success"}>{reply.classification}</Badge>
                 <p className="font-mono text-[0.7rem] uppercase tracking-[0.08em] text-muted-foreground">confidence {reply.confidence}</p>

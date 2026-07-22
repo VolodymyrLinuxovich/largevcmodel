@@ -100,8 +100,8 @@ export function ResearchConsole({
   }
 
   return (
-    <div className="grid gap-5 xl:grid-cols-[420px_1fr]">
-      <section className="border border-border">
+    <div className="grid gap-8 xl:grid-cols-[420px_1fr]">
+      <section className="border-y border-border">
         <div className="border-b border-border p-4">
           <p className="eyebrow mb-2">COMMAND</p>
           <h2 className="text-sm font-semibold uppercase tracking-[0.08em]">Research objective</h2>
@@ -138,11 +138,11 @@ export function ResearchConsole({
           {!providerConfigured ? (
             <p className="text-xs leading-5 text-[hsl(39_32%_70%)]">Research provider is {provider}. Configure Hermes before public-source research.</p>
           ) : null}
-          {error ? <p className="border border-border p-3 text-xs leading-5 text-[hsl(39_32%_70%)]">{error}</p> : null}
+          {error ? <p className="border-y border-border py-3 text-xs leading-5 text-[hsl(39_32%_70%)]">{error}</p> : null}
         </div>
       </section>
 
-      <section className="border border-border">
+      <section className="border-y border-border">
         <div className="border-b border-border p-4">
           <p className="eyebrow mb-2">AGENT TRACE</p>
           <h2 className="text-sm font-semibold uppercase tracking-[0.08em]">Operational status</h2>
@@ -163,7 +163,7 @@ export function ResearchConsole({
         </div>
       </section>
 
-      <section className="border border-border xl:col-span-2">
+      <section className="border-y border-border xl:col-span-2">
         <div className="border-b border-border p-4">
           <p className="eyebrow mb-2">RESULTS</p>
           <h2 className="text-sm font-semibold uppercase tracking-[0.08em]">Candidate records</h2>
@@ -171,7 +171,7 @@ export function ResearchConsole({
         {results?.contacts.length ? (
           <div className="divide-y divide-border">
             {results.contacts.map((contact) => (
-              <label key={contact.id} className="grid cursor-pointer gap-3 px-4 py-4 hover:bg-muted md:grid-cols-[32px_1fr_180px_120px]">
+              <label key={contact.id} className="grid cursor-pointer gap-3 px-4 py-4 transition-colors hover:text-primary md:grid-cols-[32px_1fr_180px_120px]">
                 <input
                   type="radio"
                   name="selectedContact"
@@ -203,7 +203,7 @@ export function ResearchConsole({
       </section>
 
       {run ? (
-        <section className="border border-border xl:col-span-2">
+        <section className="border-y border-border xl:col-span-2">
           <div className="border-b border-border p-4">
             <p className="eyebrow mb-2">RESEARCH RUN</p>
             <h2 className="text-sm font-semibold uppercase tracking-[0.08em]">{run.status}</h2>
@@ -212,7 +212,7 @@ export function ResearchConsole({
             {run.summary ? <p className="text-sm leading-6">{run.summary}</p> : null}
             {run.error ? <p className="text-sm leading-6 text-[hsl(39_32%_70%)]">{run.error}</p> : null}
             {run.claims?.length ? (
-              <div className="divide-y divide-border border border-border">
+              <div className="divide-y divide-border border-y border-border">
                 {run.claims.map((claim) => (
                   <div key={claim.id} className="px-4 py-3">
                     <p className="text-sm">{claim.text}</p>

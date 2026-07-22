@@ -2,9 +2,8 @@ import Link from "next/link";
 import { IntegrationService, IntegrationStatus } from "@prisma/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatDate, formatTime } from "@/lib/utils";
-import { statusForService, type MetricValue, type WorkspaceData } from "@/lib/workspace";
+import { statusForService, type WorkspaceData } from "@/lib/workspace";
 import { permissionExplanation } from "@/lib/google/scopes";
 import { ApiActionButton } from "./api-action-button";
 
@@ -17,23 +16,30 @@ export function HeroHeader({
   title,
   body,
   actions,
+  supportingLine,
+  size = "page",
 }: {
   eyebrow: string;
   title: string;
   body?: string;
   actions?: React.ReactNode;
+  supportingLine?: string;
+  size?: "home" | "page";
 }) {
   return (
-    <section className="border-b border-border px-5 py-10 sm:px-8 lg:px-10 lg:py-14">
-      <div className="grid gap-8 lg:grid-cols-[1.2fr_0.8fr] lg:items-end">
+    <section className={size === "home" ? "border-b border-border px-5 py-20 sm:px-8 lg:min-h-[calc(100svh-74px)] lg:px-10 lg:py-28" : "border-b border-border px-5 py-14 sm:px-8 lg:px-10 lg:py-20"}>
+      <div className="mx-auto grid w-full max-w-[1560px] gap-10 lg:grid-cols-[1.15fr_0.85fr] lg:items-end">
         <div>
           <p className="eyebrow">{eyebrow}</p>
-          <h1 className="mt-5 max-w-5xl text-4xl font-semibold uppercase leading-[0.95] tracking-normal sm:text-6xl lg:text-7xl">
+          <h1 className={size === "home" ? "mt-8 max-w-6xl text-5xl font-semibold uppercase leading-[0.9] tracking-normal sm:text-7xl lg:text-8xl" : "mt-6 max-w-5xl text-4xl font-semibold uppercase leading-[0.95] tracking-normal sm:text-6xl lg:text-7xl"}>
             {title}
           </h1>
-          {body ? <p className="mt-6 max-w-3xl text-sm leading-7 text-muted-foreground sm:text-base">{body}</p> : null}
+          {body ? <p className="mt-7 max-w-3xl text-sm leading-7 text-muted-foreground sm:text-base">{body}</p> : null}
+          {supportingLine ? (
+            <p className="mt-8 font-mono text-[0.68rem] uppercase tracking-[0.14em] text-muted-foreground">{supportingLine}</p>
+          ) : null}
         </div>
-        {actions ? <div className="flex flex-wrap gap-3 lg:justify-end">{actions}</div> : null}
+        {actions ? <div className="flex flex-wrap gap-3 lg:justify-end lg:pb-2">{actions}</div> : null}
       </div>
     </section>
   );
@@ -51,15 +57,17 @@ export function Section({
   aside?: React.ReactNode;
 }) {
   return (
-    <section className="border-b border-border px-5 py-7 sm:px-8 lg:px-10">
-      <div className="mb-5 grid gap-3 lg:grid-cols-[1fr_auto] lg:items-end">
-        <div>
-          {eyebrow ? <p className="eyebrow mb-2">{eyebrow}</p> : null}
-          <h2 className="text-xl font-semibold uppercase tracking-[0.06em]">{title}</h2>
+    <section className="border-b border-border px-5 py-16 sm:px-8 lg:px-10">
+      <div className="mx-auto w-full max-w-[1560px]">
+        <div className="mb-8 grid gap-4 lg:grid-cols-[minmax(0,0.82fr)_auto] lg:items-end">
+          <div>
+            {eyebrow ? <p className="eyebrow mb-2">{eyebrow}</p> : null}
+            <h2 className="max-w-4xl text-2xl font-semibold uppercase leading-tight tracking-[0.06em] sm:text-4xl">{title}</h2>
+          </div>
+          {aside}
         </div>
-        {aside}
+        {children}
       </div>
-      {children}
     </section>
   );
 }
@@ -74,22 +82,27 @@ export function EmptyState({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="border border-dashed border-border px-4 py-8">
-      <p className="text-sm font-semibold uppercase tracking-[0.08em]">{title}</p>
+    <div className="border-y border-dashed border-border py-10">
+      <p className="text-sm font-semibold uppercase tracking-[0.08em] text-foreground">{title}</p>
       <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">{body}</p>
       {action ? <div className="mt-5">{action}</div> : null}
     </div>
   );
 }
 
-export function MetricGrid({ metrics }: { metrics: Array<{ label: string; value: MetricValue; unavailable: string }> }) {
+export function AccessTrustSection() {
+  const blocks = [
+    ["OAuth 2.0", "Google authorization only. No pasted passwords or credential prompts."],
+    ["Encrypted Tokens", "Provider access and refresh tokens are encrypted at rest and never sent to the browser."],
+    ["Human Approval", "Emails and calendar events require explicit confirmation before external writes."],
+  ];
+
   return (
-    <div className="grid border-y border-border sm:grid-cols-2 xl:grid-cols-6">
-      {metrics.map((metric) => (
-        <div key={metric.label} className="border-b border-r border-border px-4 py-5 last:border-r-0 sm:border-b-0">
-          <p className="eyebrow">{metric.label}</p>
-          <p className="mt-3 font-mono text-3xl text-foreground">{metric.value === null ? "N/A" : metric.value}</p>
-          {metric.value === null ? <p className="mt-2 text-xs leading-5 text-muted-foreground">{metric.unavailable}</p> : null}
+    <div className="grid border-y border-border lg:grid-cols-3">
+      {blocks.map(([title, body]) => (
+        <div key={title} className="border-b border-border py-8 lg:border-b-0 lg:border-r lg:px-8 lg:first:pl-0 lg:last:border-r-0">
+          <p className="eyebrow">{title}</p>
+          <p className="mt-5 max-w-sm text-sm leading-7 text-muted-foreground">{body}</p>
         </div>
       ))}
     </div>
@@ -103,6 +116,8 @@ export function SignInPanel({ data }: { data: WorkspaceData }) {
         eyebrow="NETWORK INTELLIGENCE / LIVE WORKSPACE"
         title="Your network, research, and outreach in one system."
         body="Connect your professional relationships, research relevant people and companies, identify warm paths, draft informed outreach, and coordinate meetings from one auditable workspace."
+        supportingLine="Private workspace for real contacts, Gmail, Calendar, and research workflows."
+        size="home"
         actions={
           <>
             {data.configuration.googleOAuthConfigured && data.configuration.databaseConfigured ? (
@@ -121,27 +136,11 @@ export function SignInPanel({ data }: { data: WorkspaceData }) {
         }
       />
       <Section eyebrow="ACCESS MODEL" title="Private workspace">
-        <div className="grid gap-4 lg:grid-cols-3">
-          {[
-            ["OAuth 2.0", "Google sign-in uses OAuth authorization. The app never asks for Google passwords."],
-            ["Encrypted tokens", "Provider tokens are stored server-side and encrypted before being written to Postgres."],
-            ["Human approval", "Emails and calendar events require explicit user action before external writes."],
-          ].map(([title, body]) => (
-            <Card key={title}>
-              <CardHeader>
-                <CardTitle>{title}</CardTitle>
-                <CardDescription>{body}</CardDescription>
-              </CardHeader>
-            </Card>
-          ))}
-        </div>
+        <AccessTrustSection />
       </Section>
       {!data.configuration.databaseConfigured || !data.configuration.googleOAuthConfigured ? (
-        <Section title="Configuration required">
-          <EmptyState
-            title="Server environment is incomplete"
-            body="Set DATABASE_URL, SESSION_SECRET, TOKEN_ENCRYPTION_KEY, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and the OAuth redirect URI before connecting accounts."
-          />
+        <Section eyebrow="CONFIGURATION" title="Workspace setup status">
+          <IntegrationStatusPanel data={data} />
         </Section>
       ) : null}
     </PageFrame>
@@ -149,69 +148,93 @@ export function SignInPanel({ data }: { data: WorkspaceData }) {
 }
 
 export function IntegrationStatusPanel({ data }: { data: WorkspaceData }) {
-  const rows = [
+  const integrationRows = [
     { service: IntegrationService.GMAIL, label: "Gmail", href: "/api/auth/google/start?service=gmail" },
     { service: IntegrationService.GOOGLE_CONTACTS, label: "Google Contacts", href: "/api/auth/google/start?service=contacts" },
     { service: IntegrationService.GOOGLE_CALENDAR, label: "Google Calendar", href: "/api/auth/google/start?service=calendar" },
   ];
+  const systemRows = [
+    {
+      label: "Google sign-in",
+      status: data.user ? "connected" : data.configuration.googleOAuthConfigured ? "configured" : "not configured",
+      detail: data.user?.email ?? "OAuth client controls authentication and workspace ownership.",
+      action: data.user ? <Badge variant="success">signed in</Badge> : <Button asChild variant="outline" size="sm"><Link href="/api/auth/google/start?service=signin">Sign in</Link></Button>,
+    },
+    {
+      label: "Database",
+      status: data.configuration.databaseConfigured && data.databaseAvailable ? "available" : "unavailable",
+      detail: "PostgreSQL stores user-scoped contacts, research, sources, drafts, meetings, and audit events.",
+      action: <Badge variant={data.configuration.databaseConfigured && data.databaseAvailable ? "success" : "warning"}>{data.configuration.databaseConfigured && data.databaseAvailable ? "ready" : "required"}</Badge>,
+    },
+    {
+      label: "Research provider",
+      status: data.configuration.researchConfigured ? "configured" : "not configured",
+      detail: `Current provider: ${data.configuration.researchProvider}. Provider failures are shown as unavailable research runs.`,
+      action: <Badge variant={data.configuration.researchConfigured ? "success" : "warning"}>{data.configuration.researchConfigured ? "ready" : "required"}</Badge>,
+    },
+  ];
 
   return (
-    <div className="grid gap-3 lg:grid-cols-3">
-      {rows.map((row) => {
+    <div className="border-y border-border">
+      {systemRows.map((row) => (
+        <div key={row.label} className="grid gap-4 border-b border-border py-5 lg:grid-cols-[220px_1fr_auto] lg:items-center">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-[0.08em]">{row.label}</p>
+            <p className="mt-1 font-mono text-[0.66rem] uppercase tracking-[0.12em] text-muted-foreground">{row.status}</p>
+          </div>
+          <p className="max-w-3xl text-sm leading-6 text-muted-foreground">{row.detail}</p>
+          <div className="flex flex-wrap gap-2 lg:justify-end">{row.action}</div>
+        </div>
+      ))}
+      {integrationRows.map((row) => {
         const integration = statusForService(data, row.service);
         const connected = integration?.status === IntegrationStatus.CONNECTED;
         return (
-          <Card key={row.service}>
-            <CardHeader>
-              <div className="flex items-center justify-between gap-3">
-                <CardTitle>{row.label}</CardTitle>
-                <Badge variant={connected ? "success" : "muted"}>{connected ? "connected" : "not connected"}</Badge>
-              </div>
-              <CardDescription>{permissionExplanation(row.service === IntegrationService.GMAIL ? "gmail" : row.service === IntegrationService.GOOGLE_CONTACTS ? "contacts" : "calendar")}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
+          <div key={row.service} className="grid gap-4 border-b border-border py-5 last:border-b-0 lg:grid-cols-[220px_1fr_auto] lg:items-center">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.08em]">{row.label}</p>
+              <p className="mt-1 font-mono text-[0.66rem] uppercase tracking-[0.12em] text-muted-foreground">
+                {connected ? "connected" : "not connected"}
+              </p>
+            </div>
+            <div>
+              <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
+                {permissionExplanation(row.service === IntegrationService.GMAIL ? "gmail" : row.service === IntegrationService.GOOGLE_CONTACTS ? "contacts" : "calendar")}
+              </p>
               {integration ? (
-                <dl className="space-y-2 font-mono text-[0.7rem] uppercase tracking-[0.08em] text-muted-foreground">
-                  <div className="flex justify-between gap-3">
-                    <dt>Account</dt>
-                    <dd className="text-right text-foreground">{integration.accountEmail ?? "unavailable"}</dd>
-                  </div>
-                  <div className="flex justify-between gap-3">
-                    <dt>Sync</dt>
-                    <dd className="text-right text-foreground">{integration.syncStatus}</dd>
-                  </div>
-                  <div className="flex justify-between gap-3">
-                    <dt>Scopes</dt>
-                    <dd className="text-right text-foreground">{integration.scopes.length}</dd>
-                  </div>
-                  <div className="flex justify-between gap-3">
-                    <dt>Last sync</dt>
-                    <dd className="text-right text-foreground">{integration.lastSyncedAt ? formatDate(integration.lastSyncedAt) : "not synced"}</dd>
-                  </div>
-                </dl>
+                <p className="mt-2 font-mono text-[0.66rem] uppercase tracking-[0.12em] text-muted-foreground">
+                  {integration.accountEmail ?? "account unavailable"} / sync {integration.syncStatus} / scopes {integration.scopes.length} / last{" "}
+                  {integration.lastSyncedAt ? formatDate(integration.lastSyncedAt) : "not synced"}
+                </p>
               ) : null}
-              <div className="flex flex-wrap gap-2">
-                <Button asChild variant={connected ? "outline" : "default"} size="sm">
-                  <Link href={row.href}>{connected ? "Reconnect" : "Connect"}</Link>
-                </Button>
-                {connected ? (
-                  <ApiActionButton
-                    endpoint={`/api/sync/google/${row.service === IntegrationService.GMAIL ? "gmail" : row.service === IntegrationService.GOOGLE_CONTACTS ? "contacts" : "calendar"}`}
-                    variant="secondary"
-                    size="sm"
-                  >
-                    Sync
-                  </ApiActionButton>
-                ) : null}
-                {connected && integration ? (
-                  <ApiActionButton endpoint={`/api/integrations/${integration.id}/disconnect`} variant="outline" size="sm">
-                    Disconnect
-                  </ApiActionButton>
-                ) : null}
-              </div>
-              {integration?.lastError ? <p className="text-xs leading-5 text-[hsl(39_32%_70%)]">{integration.lastError}</p> : null}
-            </CardContent>
-          </Card>
+              {integration?.lastError ? <p className="mt-2 text-xs leading-5 text-[hsl(39_32%_70%)]">{integration.lastError}</p> : null}
+            </div>
+            <div className="flex flex-wrap gap-2 lg:justify-end">
+              <Button asChild variant={connected ? "outline" : "default"} size="sm">
+                <Link href={row.href}>{connected ? "Reconnect" : "Connect"}</Link>
+              </Button>
+              {connected ? (
+                <ApiActionButton
+                  endpoint={`/api/sync/google/${
+                    row.service === IntegrationService.GMAIL
+                      ? "gmail"
+                      : row.service === IntegrationService.GOOGLE_CONTACTS
+                        ? "contacts"
+                        : "calendar"
+                  }`}
+                  variant="secondary"
+                  size="sm"
+                >
+                  Sync
+                </ApiActionButton>
+              ) : null}
+              {connected && integration ? (
+                <ApiActionButton endpoint={`/api/integrations/${integration.id}/disconnect`} variant="outline" size="sm">
+                  Disconnect
+                </ApiActionButton>
+              ) : null}
+            </div>
+          </div>
         );
       })}
     </div>

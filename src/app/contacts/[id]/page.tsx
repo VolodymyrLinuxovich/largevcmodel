@@ -49,7 +49,7 @@ export default async function ContactProfilePage({ params }: { params: Promise<{
       <section className="grid border-b border-border lg:grid-cols-[1fr_380px]">
         <div className="border-b border-border px-5 py-7 sm:px-8 lg:border-b-0 lg:border-r lg:px-10">
           <p className="eyebrow mb-2">PROFILE SUMMARY</p>
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="border-y border-border">
             {[
               ["Source", contact.source.replaceAll("_", " ")],
               ["Email", contact.primaryEmail ?? "Unavailable"],
@@ -58,14 +58,14 @@ export default async function ContactProfilePage({ params }: { params: Promise<{
               ["Interaction count", contact.interactionCount],
               ["Relationship strength", contact.relationshipStrength ?? "Uncalculated"],
             ].map(([label, value]) => (
-              <div key={String(label)} className="border border-border p-4">
+              <div key={String(label)} className="grid gap-3 border-b border-border py-4 last:border-b-0 sm:grid-cols-[180px_1fr]">
                 <p className="eyebrow">{label}</p>
-                <p className="mt-3 text-sm text-foreground">{value}</p>
+                <p className="text-sm text-foreground">{value}</p>
               </div>
             ))}
           </div>
           {contact.notes ? (
-            <div className="mt-4 border border-border p-4">
+            <div className="mt-6 border-y border-border py-4">
               <p className="eyebrow mb-3">User notes</p>
               <p className="text-sm leading-6">{contact.notes}</p>
             </div>
@@ -75,9 +75,9 @@ export default async function ContactProfilePage({ params }: { params: Promise<{
         <div className="px-5 py-7 sm:px-8 lg:px-10">
           <p className="eyebrow mb-2">THESIS FIT</p>
           {contact.fitScores.length ? (
-            <div className="space-y-3">
+            <div className="divide-y divide-border border-y border-border">
               {contact.fitScores.map((score) => (
-                <div key={score.id} className="border border-border p-4">
+                <div key={score.id} className="py-5">
                   <div className="flex items-start justify-between gap-3">
                     <p className="font-mono text-4xl">{score.overall}</p>
                     <Badge variant="outline">confidence {score.confidence}</Badge>
@@ -98,9 +98,9 @@ export default async function ContactProfilePage({ params }: { params: Promise<{
       <Section eyebrow="EVIDENCE" title="Claims and sources">
         {contact.claims.length ? (
           <div className="grid gap-4 xl:grid-cols-[1fr_420px]">
-            <div className="divide-y divide-border border border-border">
+            <div className="divide-y divide-border border-y border-border">
               {contact.claims.map((claim) => (
-                <div key={claim.id} className="px-4 py-4">
+                <div key={claim.id} className="py-4">
                   <p className="text-sm leading-6">{claim.text}</p>
                   <div className="mt-3 flex flex-wrap gap-2">
                     <Badge variant={claim.provenance === "UNVERIFIED" ? "warning" : "muted"}>{claim.provenance.replaceAll("_", " ")}</Badge>
@@ -124,7 +124,7 @@ export default async function ContactProfilePage({ params }: { params: Promise<{
       <section className="grid border-b border-border lg:grid-cols-3">
         <Panel title="Gmail threads" emptyTitle="No Gmail history" emptyBody="Connect and sync Gmail to view real conversation threads.">
           {contact.gmailThreads.map((thread) => (
-            <a key={thread.id} href={thread.threadUrl ?? undefined} target="_blank" rel="noreferrer" className="block border border-border p-4 hover:bg-muted">
+            <a key={thread.id} href={thread.threadUrl ?? undefined} target="_blank" rel="noreferrer" className="block py-4 transition-colors hover:text-primary">
               <p className="text-sm font-semibold">{thread.subject ?? "Email thread"}</p>
               <p className="mt-2 text-xs leading-5 text-muted-foreground">{thread.snippet ?? "No snippet available."}</p>
             </a>
@@ -132,7 +132,7 @@ export default async function ContactProfilePage({ params }: { params: Promise<{
         </Panel>
         <Panel title="Meetings" emptyTitle="No calendar history" emptyBody="Connect and sync Google Calendar to view real meetings for this contact.">
           {contact.calendarEvents.map((event) => (
-            <a key={event.id} href={event.htmlLink ?? undefined} target="_blank" rel="noreferrer" className="block border border-border p-4 hover:bg-muted">
+            <a key={event.id} href={event.htmlLink ?? undefined} target="_blank" rel="noreferrer" className="block py-4 transition-colors hover:text-primary">
               <p className="text-sm font-semibold">{event.title ?? "Calendar event"}</p>
               <p className="mt-2 font-mono text-[0.7rem] uppercase tracking-[0.08em] text-muted-foreground"><Timestamp value={event.startsAt} /></p>
             </a>
@@ -140,7 +140,7 @@ export default async function ContactProfilePage({ params }: { params: Promise<{
         </Panel>
         <Panel title="Outreach history" emptyTitle="No outreach" emptyBody="Drafted, saved, sent, and replied states will appear here after Gmail actions.">
           {contact.outreachDrafts.map((draft) => (
-            <Link key={draft.id} href="/outreach" className="block border border-border p-4 hover:bg-muted">
+            <Link key={draft.id} href="/outreach" className="block py-4 transition-colors hover:text-primary">
               <p className="text-sm font-semibold">{draft.subject}</p>
               <p className="mt-2 font-mono text-[0.7rem] uppercase tracking-[0.08em] text-muted-foreground">{draft.status.replaceAll("_", " ")}</p>
             </Link>
@@ -154,9 +154,9 @@ export default async function ContactProfilePage({ params }: { params: Promise<{
 function SourcesList({ sources }: { sources: Array<{ id: string; title: string; url: string; publisher: string | null; publishedAt: Date | null; sourceType: string; origin: string; supportsClaims: string[] }> }) {
   if (!sources.length) return <EmptyState title="No sources used" body="No public source links have been persisted for this profile." />;
   return (
-    <div className="divide-y divide-border border border-border">
+    <div className="divide-y divide-border border-y border-border">
       {sources.map((source) => (
-        <a key={source.id} href={source.url} target="_blank" rel="noreferrer" className="block px-4 py-4 hover:bg-muted">
+        <a key={source.id} href={source.url} target="_blank" rel="noreferrer" className="block py-4 transition-colors hover:text-primary">
           <div className="flex items-start justify-between gap-4">
             <p className="text-sm font-semibold">{source.title}</p>
             <Badge variant="muted">{source.origin}</Badge>
@@ -176,7 +176,7 @@ function Panel({ title, emptyTitle, emptyBody, children }: { title: string; empt
     <div className="border-b border-border px-5 py-7 sm:px-8 lg:border-b-0 lg:border-r lg:px-10 lg:last:border-r-0">
       <p className="eyebrow mb-2">{title}</p>
       <h2 className="mb-5 text-xl font-semibold uppercase tracking-[0.06em]">{title}</h2>
-      {children.length ? <div className="space-y-3">{children}</div> : <EmptyState title={emptyTitle} body={emptyBody} />}
+      {children.length ? <div className="divide-y divide-border border-y border-border">{children}</div> : <EmptyState title={emptyTitle} body={emptyBody} />}
     </div>
   );
 }

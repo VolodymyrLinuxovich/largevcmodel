@@ -34,11 +34,11 @@ export default async function OutreachPage() {
         {!gmailConnected ? (
           <EmptyState title="Gmail not connected" body="Connect Gmail to create drafts, review saved Gmail drafts, send approved messages, and track replies. No messages are sent automatically." action={<Button asChild><Link href="/settings">Connect Gmail</Link></Button>} />
         ) : drafts.length ? (
-          <div className="divide-y divide-border border border-border">
+          <div className="divide-y divide-border border-y border-border">
             {drafts.map((draft) => {
               const rationale = draft.rationale ? safeJson(draft.rationale) : null;
               return (
-                <div key={draft.id} className="grid gap-4 px-4 py-5 xl:grid-cols-[1fr_360px]">
+                <div key={draft.id} className="grid gap-5 py-6 xl:grid-cols-[1fr_360px]">
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge variant={draft.status === OutreachStatus.SENT ? "success" : draft.status === OutreachStatus.FAILED ? "warning" : "muted"}>
@@ -52,18 +52,20 @@ export default async function OutreachPage() {
                     <p className="mt-1 text-sm text-muted-foreground">
                       {draft.contact.fullName ?? draft.contact.primaryEmail ?? "Unnamed contact"}
                     </p>
-                    <pre className="mt-4 whitespace-pre-wrap border border-border bg-background p-4 font-mono text-xs leading-6 text-foreground">
+                    <pre className="mt-4 whitespace-pre-wrap border-y border-border bg-background py-4 font-mono text-xs leading-6 text-foreground">
                       {draft.body}
                     </pre>
                   </div>
                   <aside className="space-y-3">
-                    <div className="border border-border p-4">
+                    <div className="border-y border-border py-4">
                       <p className="eyebrow mb-3">Why personalized</p>
                       <p className="text-xs leading-5 text-muted-foreground">{String(rationale?.summary ?? "No rationale stored.")}</p>
                       {Array.isArray(rationale?.claims) && rationale.claims.length ? (
                         <ul className="mt-3 space-y-2 text-xs leading-5 text-muted-foreground">
                           {rationale.claims.map((claim: { claim: string; sourceTitle: string }, index: number) => (
-                            <li key={`${draft.id}-${index}`}>{claim.claim} ({claim.sourceTitle})</li>
+                            <li key={`${draft.id}-${index}`}>
+                              {claim.claim} ({claim.sourceTitle})
+                            </li>
                           ))}
                         </ul>
                       ) : null}

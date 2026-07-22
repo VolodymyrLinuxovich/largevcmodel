@@ -7,14 +7,14 @@
 :root {
   --font-geist-sans: Montserrat, Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-geist-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-  --background: 24 11% 7%;
-  --foreground: 42 19% 91%;
-  --card: 24 10% 10%;
+  --background: 24 12% 6%;
+  --foreground: 42 18% 92%;
+  --card: 24 10% 8%;
   --card-foreground: 42 19% 91%;
   --muted: 28 9% 15%;
   --muted-foreground: 39 9% 61%;
-  --primary: 42 19% 91%;
-  --primary-foreground: 24 11% 7%;
+  --primary: 345 73% 49%;
+  --primary-foreground: 42 18% 94%;
   --secondary: 25 9% 14%;
   --secondary-foreground: 42 19% 91%;
   --accent: 26 11% 22%;
@@ -36,11 +36,7 @@ html {
 }
 
 body {
-  background:
-    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px),
-    hsl(var(--background));
-  background-size: 72px 72px;
+  background: hsl(var(--background));
   color: hsl(var(--foreground));
 }
 
@@ -49,14 +45,14 @@ a {
 }
 
 ::selection {
-  background: hsl(var(--foreground));
-  color: hsl(var(--background));
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
 }
 
 .eyebrow {
   font-family: var(--font-geist-mono);
-  font-size: 0.68rem;
-  letter-spacing: 0.08em;
+  font-size: 0.64rem;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
   color: hsl(var(--muted-foreground));
 }
@@ -68,4 +64,32 @@ a {
 .citation-highlight {
   outline: 1px solid hsl(var(--foreground));
   outline-offset: 2px;
+}
+
+.lvc-flow .react-flow__pane,
+.lvc-flow .react-flow__renderer {
+  background: hsl(var(--background));
+}
+
+.lvc-flow .react-flow__attribution {
+  display: none;
+}
+
+.lvc-flow-controls {
+  box-shadow: none;
+}
+
+.lvc-flow-controls button {
+  background: hsl(var(--background));
+  border: 1px solid hsl(var(--border));
+  border-bottom: 0;
+  color: hsl(var(--foreground));
+}
+
+.lvc-flow-controls button:hover {
+  background: hsl(var(--muted));
+}
+
+.lvc-flow-controls button svg {
+  fill: hsl(var(--foreground));
 }
