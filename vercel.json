@@ -1,0 +1,7 @@
+{
+  "framework": "nextjs",
+  "env": {
+    "DATABASE_URL": "file:/tmp/largevcmodel.db",
+    "RESEARCH_PROVIDER": "mock"
+  }
+}

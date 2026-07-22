@@ -1,0 +1,302 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  role      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Partner {
+  id            String         @id
+  name          String
+  title         String
+  email         String         @unique
+  location      String
+  thesisFocus   String
+  avatarInitial String
+  calendarSlots CalendarSlot[]
+  meetings      Meeting[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+}
+
+model Company {
+  id                  String          @id
+  name                String
+  slug                String          @unique
+  website             String?
+  description         String
+  sector              String
+  stage               String
+  headquarters        String
+  latestFundingRound  String?
+  latestFundingAmount String?
+  latestFundingDate   DateTime?
+  checkSizeFit        String
+  demoData            Boolean         @default(true)
+  contacts            Contact[]
+  founderProfiles     FounderProfile[]
+  claims              ResearchClaim[]
+  sources             Source[]
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+}
+
+model Contact {
+  id                   String           @id
+  fullName             String
+  email                String?          @unique
+  linkedInUrl          String?
+  role                 String
+  location             String
+  sector               String
+  stage                String
+  checkSizeMin         Int?
+  checkSizeMax         Int?
+  relationshipStrength Int              @default(0)
+  researchConfidence   Int              @default(60)
+  crmStatus            String           @default("New Lead")
+  sourceLabel          String           @default("Internal CRM")
+  dataBoundary         String           @default("Seeded fictional demo data")
+  companyId            String?
+  company              Company?         @relation(fields: [companyId], references: [id])
+  founderProfile       FounderProfile?
+  claims               ResearchClaim[]
+  sources              Source[]
+  fitScores            FitScore[]
+  outreachDrafts       OutreachDraft[]
+  outreachEvents       OutreachEvent[]
+  replies              Reply[]
+  meetings             Meeting[]
+  auditEvents          AuditEvent[]
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+}
+
+model FounderProfile {
+  id                  String   @id
+  contactId           String   @unique
+  companyId           String
+  summary             String
+  companyDescription  String
+  thesisFit           String
+  concerns            String
+  pastInteractions    String
+  outreachHistoryText String
+  contact             Contact  @relation(fields: [contactId], references: [id])
+  company             Company  @relation(fields: [companyId], references: [id])
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+model InvestmentThesis {
+  id           String   @id
+  name         String
+  description  String
+  sectors      String
+  stages       String
+  geographies  String
+  checkSizeMin Int
+  checkSizeMax Int
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model RelationshipEdge {
+  id              String   @id
+  fromNodeId      String
+  fromNodeLabel   String
+  fromNodeType    String
+  toNodeId        String
+  toNodeLabel     String
+  toNodeType      String
+  relationship    String
+  strength        Int
+  evidence        String
+  sourceType      String
+  sourceId        String?
+  createdAt       DateTime @default(now())
+}
+
+model ResearchRun {
+  id                String          @id @default(cuid())
+  query             String
+  structuredIntent  String
+  provider          String
+  status            String
+  summary           String
+  executionSteps    String
+  startedAt         DateTime        @default(now())
+  completedAt       DateTime?
+  claims            ResearchClaim[]
+  fitScores         FitScore[]
+  outreachDrafts    OutreachDraft[]
+  auditEvents       AuditEvent[]
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+}
+
+model ResearchClaim {
+  id           String        @id @default(cuid())
+  researchRunId String?
+  contactId    String?
+  companyId    String?
+  text         String
+  category     String
+  provenance   String
+  confidence   Int
+  researchRun  ResearchRun?  @relation(fields: [researchRunId], references: [id])
+  contact      Contact?      @relation(fields: [contactId], references: [id])
+  company      Company?      @relation(fields: [companyId], references: [id])
+  sources      ClaimSource[]
+  createdAt    DateTime      @default(now())
+}
+
+model Source {
+  id             String        @id @default(cuid())
+  title          String
+  url            String
+  canonicalUrl   String        @unique
+  publisher      String?
+  publishedAt    DateTime?
+  accessedAt     DateTime
+  sourceType     String
+  origin         String
+  snippet        String?
+  contactId      String?
+  companyId      String?
+  supportsClaims String
+  contact        Contact?      @relation(fields: [contactId], references: [id])
+  company        Company?      @relation(fields: [companyId], references: [id])
+  claims         ClaimSource[]
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+}
+
+model ClaimSource {
+  id             String        @id @default(cuid())
+  claimId        String
+  sourceId       String
+  supportedClaim String
+  claim          ResearchClaim @relation(fields: [claimId], references: [id])
+  source         Source        @relation(fields: [sourceId], references: [id])
+
+  @@unique([claimId, sourceId])
+}
+
+model FitScore {
+  id             String      @id @default(cuid())
+  researchRunId  String?
+  contactId      String
+  thesisMatch    Int
+  stageFit       Int
+  geographyFit   Int
+  momentum       Int
+  relationship   Int
+  evidence       Int
+  overall        Int
+  explanation    String
+  weightsJson    String
+  citationsJson  String
+  researchRun    ResearchRun? @relation(fields: [researchRunId], references: [id])
+  contact        Contact      @relation(fields: [contactId], references: [id])
+  createdAt      DateTime     @default(now())
+}
+
+model OutreachDraft {
+  id            String          @id @default(cuid())
+  contactId     String
+  researchRunId String?
+  format        String
+  tone          String
+  version       String
+  subject       String
+  body          String
+  rationale     String
+  status        String          @default("Draft")
+  approvedAt    DateTime?
+  sentAt        DateTime?
+  contact       Contact         @relation(fields: [contactId], references: [id])
+  researchRun   ResearchRun?    @relation(fields: [researchRunId], references: [id])
+  events        OutreachEvent[]
+  replies       Reply[]
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+}
+
+model OutreachEvent {
+  id        String         @id @default(cuid())
+  draftId   String?
+  contactId String?
+  type      String
+  actor     String
+  note      String
+  timestamp DateTime       @default(now())
+  draft     OutreachDraft? @relation(fields: [draftId], references: [id])
+  contact   Contact?       @relation(fields: [contactId], references: [id])
+}
+
+model Reply {
+  id                  String         @id @default(cuid())
+  contactId           String
+  draftId             String?
+  body                String
+  classification      String
+  confidence          Int
+  requiresHumanReview Boolean        @default(false)
+  createdAt           DateTime       @default(now())
+  contact             Contact        @relation(fields: [contactId], references: [id])
+  draft               OutreachDraft? @relation(fields: [draftId], references: [id])
+}
+
+model CalendarSlot {
+  id        String   @id
+  partnerId String
+  startTime DateTime
+  endTime   DateTime
+  timezone  String
+  status    String   @default("available")
+  label     String
+  partner   Partner  @relation(fields: [partnerId], references: [id])
+}
+
+model Meeting {
+  id         String   @id @default(cuid())
+  contactId  String
+  partnerId  String?
+  title      String
+  startTime  DateTime
+  endTime    DateTime
+  meetingUrl String
+  status     String   @default("Booked")
+  contact    Contact  @relation(fields: [contactId], references: [id])
+  partner    Partner? @relation(fields: [partnerId], references: [id])
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model AuditEvent {
+  id                String       @id @default(cuid())
+  actor             String
+  actorType         String
+  action            String
+  timestamp         DateTime     @default(now())
+  affectedFounderId String?
+  dataSource        String
+  details           String
+  scoreDelta        String?
+  researchRunId     String?
+  affectedFounder   Contact?     @relation(fields: [affectedFounderId], references: [id])
+  researchRun       ResearchRun?  @relation(fields: [researchRunId], references: [id])
+}
