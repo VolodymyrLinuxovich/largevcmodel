@@ -13,6 +13,7 @@ const navItems = [
   { href: "/outreach", label: "Outreach" },
   { href: "/meetings", label: "Meetings" },
   { href: "/audit", label: "Audit Log" },
+  { href: "/profile", label: "Profile" },
 ];
 
 export function AppHeaderNav({

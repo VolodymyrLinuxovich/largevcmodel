@@ -1,16 +1,25 @@
 import { isDatabaseConfigured, isGoogleOAuthConfigured } from "@/lib/config";
-import { getSession } from "@/lib/auth/session";
+import { getWorkspaceData } from "@/lib/workspace";
+import { deriveWorkspaceConnectionState, workspaceCtaForState } from "@/lib/workspace-state";
 import { AppHeaderNav } from "./app-header-nav";
 
 export async function AppHeader() {
-  const session = await getSession();
+  const data = await getWorkspaceData();
   const canStartGoogleAuth = isDatabaseConfigured() && isGoogleOAuthConfigured();
+  const state = deriveWorkspaceConnectionState({
+    user: data.user,
+    googleOAuthConfigured: canStartGoogleAuth,
+    databaseConfigured: data.configuration.databaseConfigured,
+    integrations: data.integrations,
+    syncJobs: data.syncJobs,
+  });
+  const cta = workspaceCtaForState(state);
 
   return (
     <AppHeaderNav
-      ctaDisabled={!session && !canStartGoogleAuth}
-      ctaHref={session ? "/settings" : "/api/auth/google/start?service=signin"}
-      ctaLabel={session ? "Connect Workspace" : "Sign in with Google"}
+      ctaDisabled={!data.user && !canStartGoogleAuth}
+      ctaHref={cta.href}
+      ctaLabel={cta.label}
     />
   );
 }

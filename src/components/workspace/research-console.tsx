@@ -1,31 +1,75 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
 
-type SearchContact = {
+type ParsedNetworkQuery = {
+  rawQuery: string;
+  entityTypes: string[];
+  roles: string[];
+  topics: string[];
+  geographies: string[];
+  institutions: string[];
+  companies: string[];
+  fundingStages: string[];
+  dateRange?: { preset: string; start?: string; end?: string };
+  relationshipRequirements: string[];
+  interactionTypes: string[];
+  followUpState?: string;
+  introductionPathRequired: boolean;
+  positiveKeywords: string[];
+  negativeKeywords: string[];
+  strictness: "strict" | "balanced" | "exploratory";
+  requestedAutomatedContent: boolean;
+  unavailableVerification: string[];
+  sources: string[];
+};
+
+type SearchEvidence = {
+  criterion: string;
+  state: "matched" | "missing" | "contradicted" | "unavailable";
+  label: string;
+  value?: string | null;
+  source: string;
+};
+
+type SearchResult = {
   id: string;
-  fullName: string | null;
-  primaryEmail: string | null;
-  organization: string | null;
-  title: string | null;
-  relationshipStrength: number | null;
-  interactionCount: number;
+  entityType: "PERSON" | "COMPANY" | "ORGANIZATION" | "CONVERSATION" | "MEETING";
+  title: string;
+  subtitle?: string | null;
+  href?: string | null;
+  score: number;
+  confidence: number;
+  classification: string;
+  classificationConfidence: number;
+  classificationSignals: string[];
+  whyMatched: string;
+  evidence: SearchEvidence[];
+  missingCriteria: SearchEvidence[];
+  contradictedCriteria: SearchEvidence[];
+  unavailableCriteria: SearchEvidence[];
+  sourceTypes: string[];
+  lastInteractionAt?: string | null;
+  metadata?: { contactId?: string; companyId?: string; [key: string]: unknown };
 };
 
 type SearchResponse = {
-  intent: {
-    sectors: string[];
-    stages: string[];
-    geographies: string[];
-    minimumRelationshipStrength?: number;
+  interpreted: ParsedNetworkQuery;
+  results: SearchResult[];
+  emptyReasons: string[];
+  counts: {
+    contacts: number;
+    companies: number;
+    conversations: number;
+    meetings: number;
+    candidates: number;
   };
-  contacts: SearchContact[];
 };
 
 type ResearchRun = {
@@ -35,9 +79,18 @@ type ResearchRun = {
   status: string;
   summary?: string | null;
   error?: string | null;
-  createdAt?: string | Date;
   claims?: Array<{ id: string; text: string; provenance: string; confidence?: number | null }>;
 };
+
+const ENTITY_OPTIONS = [
+  ["", "Auto"],
+  ["person", "People"],
+  ["company", "Companies"],
+  ["organization", "Organizations"],
+  ["conversation", "Conversations"],
+  ["meeting", "Meetings"],
+  ["mixed", "Mixed"],
+];
 
 export function ResearchConsole({
   provider,
@@ -52,91 +105,157 @@ export function ResearchConsole({
   const [stage, setStage] = useState("");
   const [sector, setSector] = useState("");
   const [geography, setGeography] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
+  const [dateRange, setDateRange] = useState("");
+  const [entityType, setEntityType] = useState("");
+  const [relationshipFilter, setRelationshipFilter] = useState("");
+  const [strictness, setStrictness] = useState<"strict" | "balanced" | "exploratory">("balanced");
+  const [loading, setLoading] = useState<"idle" | "interpreting" | "searching" | "researching">("idle");
+  const [selectedResultId, setSelectedResultId] = useState<string | null>(null);
+  const [interpretation, setInterpretation] = useState<ParsedNetworkQuery | null>(null);
   const [results, setResults] = useState<SearchResponse | null>(null);
   const [run, setRun] = useState<ResearchRun | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const payload = useMemo(
+    () => ({
+      query,
+      stage: stage || undefined,
+      sector: sector || undefined,
+      geography: geography || undefined,
+      dateRange: dateRange || undefined,
+      entityType: entityType || undefined,
+      relationshipFilter: relationshipFilter || undefined,
+      strictness,
+    }),
+    [dateRange, entityType, geography, query, relationshipFilter, sector, stage, strictness],
+  );
+  const selectedResult = results?.results.find((result) => result.id === selectedResultId) ?? null;
+  const selectedResearchSubject = selectedResult?.metadata?.contactId
+    ? { contactId: selectedResult.metadata.contactId }
+    : selectedResult?.metadata?.companyId
+      ? { companyId: selectedResult.metadata.companyId }
+      : null;
+
+  async function interpretObjective() {
+    setLoading("interpreting");
+    setError(null);
+    setRun(null);
+    try {
+      const response = await fetch("/api/query/interpret", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Interpretation failed");
+      setInterpretation(body.interpreted);
+    } catch (interpretError) {
+      setError(interpretError instanceof Error ? interpretError.message : "Interpretation failed");
+    } finally {
+      setLoading("idle");
+    }
+  }
+
   async function searchNetwork() {
-    setLoading(true);
+    setLoading("searching");
     setError(null);
     setRun(null);
     try {
       const response = await fetch("/api/query", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ query, stage: stage || undefined, sector: sector || undefined, geography: geography || undefined }),
+        body: JSON.stringify(payload),
       });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error ?? "Search failed");
-      setResults(payload);
-      setSelectedContactId(payload.contacts?.[0]?.id ?? null);
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Search failed");
+      setResults(body);
+      setInterpretation(body.interpreted);
+      setSelectedResultId(body.results?.[0]?.id ?? null);
     } catch (searchError) {
       setError(searchError instanceof Error ? searchError.message : "Search failed");
     } finally {
-      setLoading(false);
+      setLoading("idle");
     }
   }
 
-  async function researchSelectedContact() {
-    if (!selectedContactId) return;
-    setLoading(true);
+  async function researchSelected() {
+    if (!selectedResearchSubject) return;
+    setLoading("researching");
     setError(null);
     try {
       const response = await fetch("/api/research", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ contactId: selectedContactId, query: query || "Research this contact and associated company." }),
+        body: JSON.stringify({ ...selectedResearchSubject, query: query || "Research this selected record." }),
       });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error ?? "Research failed");
-      setRun(payload.run);
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Research failed");
+      setRun(body.run);
     } catch (researchError) {
       setError(researchError instanceof Error ? researchError.message : "Research failed");
     } finally {
-      setLoading(false);
+      setLoading("idle");
     }
   }
 
   return (
-    <div className="grid gap-8 xl:grid-cols-[420px_1fr]">
+    <div className="grid gap-8 xl:grid-cols-[430px_1fr]">
       <section className="border-y border-border">
         <div className="border-b border-border p-4">
           <p className="eyebrow mb-2">COMMAND</p>
-          <h2 className="text-sm font-semibold uppercase tracking-[0.08em]">Research objective</h2>
+          <h2 className="text-sm font-semibold uppercase tracking-[0.08em]">Network objective</h2>
         </div>
         <div className="space-y-4 p-4">
           <Textarea
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search real contacts and companies from connected accounts..."
-            aria-label="Natural language research query"
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setInterpretation(null);
+            }}
+            placeholder="Find investors I spoke with last year, conversations about robotics, people who could introduce me to someone at Anduril..."
+            aria-label="Natural language network intelligence query"
           />
-          <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
-            <Input value={sector} onChange={(event) => setSector(event.target.value)} placeholder="Sector filter" aria-label="Sector filter" />
-            <Input value={geography} onChange={(event) => setGeography(event.target.value)} placeholder="Geography filter" aria-label="Geography filter" />
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+            <Input value={sector} onChange={(event) => setSector(event.target.value)} placeholder="Sector or topic" aria-label="Sector or topic filter" />
+            <Input value={geography} onChange={(event) => setGeography(event.target.value)} placeholder="Geography" aria-label="Geography filter" />
+            <Input value={dateRange} onChange={(event) => setDateRange(event.target.value)} placeholder="Date range, e.g. last year" aria-label="Date range filter" />
+            <Input value={relationshipFilter} onChange={(event) => setRelationshipFilter(event.target.value)} placeholder="Relationship filter" aria-label="Relationship filter" />
+            <Select value={entityType} onChange={(event) => setEntityType(event.target.value)} aria-label="Entity type filter">
+              {ENTITY_OPTIONS.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </Select>
             <Select value={stage} onChange={(event) => setStage(event.target.value)} aria-label="Stage filter">
               <option value="">Any stage</option>
-              <option value="Pre-seed">Pre-seed</option>
-              <option value="Seed">Seed</option>
+              <option value="pre-seed">Pre-seed</option>
+              <option value="seed">Seed</option>
               <option value="Series A">Series A</option>
-              <option value="Growth">Growth</option>
+              <option value="growth">Growth</option>
+            </Select>
+            <Select value={strictness} onChange={(event) => setStrictness(event.target.value as typeof strictness)} aria-label="Match strictness">
+              <option value="strict">Strict</option>
+              <option value="balanced">Balanced</option>
+              <option value="exploratory">Exploratory</option>
             </Select>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button onClick={searchNetwork} disabled={!contactsConnected || !query || loading}>
+            <Button onClick={interpretObjective} disabled={!contactsConnected || !query || loading !== "idle"} variant="outline">
+              Review interpretation
+            </Button>
+            <Button onClick={searchNetwork} disabled={!contactsConnected || !query || loading !== "idle"}>
               Search network
             </Button>
-            <Button onClick={researchSelectedContact} disabled={!providerConfigured || !selectedContactId || loading} variant="outline">
+            <Button onClick={researchSelected} disabled={!providerConfigured || !selectedResearchSubject || loading !== "idle"} variant="outline">
               Research selected
             </Button>
           </div>
           {!contactsConnected ? (
-            <p className="text-xs leading-5 text-[hsl(39_32%_70%)]">Connect Google Contacts or Gmail before searching your network.</p>
+            <p className="text-xs leading-5 text-[hsl(39_32%_70%)]">Connect and sync Google Contacts, Gmail, or Calendar before searching your network.</p>
           ) : null}
           {!providerConfigured ? (
-            <p className="text-xs leading-5 text-[hsl(39_32%_70%)]">Research provider is {provider}. Configure Hermes before public-source research.</p>
+            <p className="text-xs leading-5 text-[hsl(39_32%_70%)]">Research provider is {provider}. Connected-workspace search still works; public verification remains unavailable.</p>
           ) : null}
           {error ? <p className="border-y border-border py-3 text-xs leading-5 text-[hsl(39_32%_70%)]">{error}</p> : null}
         </div>
@@ -144,60 +263,65 @@ export function ResearchConsole({
 
       <section className="border-y border-border">
         <div className="border-b border-border p-4">
-          <p className="eyebrow mb-2">AGENT TRACE</p>
-          <h2 className="text-sm font-semibold uppercase tracking-[0.08em]">Operational status</h2>
+          <p className="eyebrow mb-2">INTERPRETATION</p>
+          <h2 className="text-sm font-semibold uppercase tracking-[0.08em]">Review before execution</h2>
         </div>
-        <div className="grid divide-y divide-border">
-          {[
-            ["Parsing investment objective", results ? "complete" : loading ? "running" : "waiting"],
-            ["Searching connected account records", results ? "complete" : "waiting"],
-            ["Researching public information through provider", run ? run.status.toLowerCase() : "waiting"],
-            ["Preserving claims and citations", run?.claims?.length ? "complete" : "waiting"],
-            ["Calculating thesis fit", "available from contact profile scoring"],
-          ].map(([step, status]) => (
-            <div key={step} className="grid gap-3 px-4 py-3 md:grid-cols-[1fr_160px]">
-              <p className="text-sm">{step}</p>
-              <Badge variant={status === "complete" ? "success" : status === "running" ? "warning" : "muted"}>{status}</Badge>
-            </div>
-          ))}
-        </div>
+        {interpretation ? (
+          <div className="divide-y divide-border">
+            <InterpretationRow label="Looking for" values={interpretation.entityTypes.map(titleCase)} />
+            <InterpretationRow label="Roles" values={interpretation.roles} />
+            <InterpretationRow label="Topics" values={interpretation.topics} />
+            <InterpretationRow label="Geography" values={interpretation.geographies} />
+            <InterpretationRow label="Companies" values={interpretation.companies} />
+            <InterpretationRow label="Date range" values={interpretation.dateRange ? [interpretation.dateRange.preset] : []} />
+            <InterpretationRow label="Relationship" values={interpretation.relationshipRequirements} />
+            <InterpretationRow label="Sources" values={interpretation.sources} />
+            <InterpretationRow label="Unavailable verification" values={interpretation.unavailableVerification} warning />
+          </div>
+        ) : (
+          <div className="p-6 text-sm leading-6 text-muted-foreground">
+            Review the parser output before searching. Empty criteria stay empty rather than being forced into an investment template.
+          </div>
+        )}
       </section>
 
       <section className="border-y border-border xl:col-span-2">
-        <div className="border-b border-border p-4">
-          <p className="eyebrow mb-2">RESULTS</p>
-          <h2 className="text-sm font-semibold uppercase tracking-[0.08em]">Candidate records</h2>
+        <div className="grid gap-3 border-b border-border p-4 md:grid-cols-[1fr_auto] md:items-end">
+          <div>
+            <p className="eyebrow mb-2">RESULTS</p>
+            <h2 className="text-sm font-semibold uppercase tracking-[0.08em]">Search results</h2>
+          </div>
+          {results ? (
+            <p className="font-mono text-[0.68rem] uppercase tracking-[0.12em] text-muted-foreground">
+              {results.results.length} results / {results.counts.candidates} candidates reviewed
+            </p>
+          ) : null}
         </div>
-        {results?.contacts.length ? (
+        {results?.results.length ? (
           <div className="divide-y divide-border">
-            {results.contacts.map((contact) => (
-              <label key={contact.id} className="grid cursor-pointer gap-3 px-4 py-4 transition-colors hover:text-primary md:grid-cols-[32px_1fr_180px_120px]">
-                <input
-                  type="radio"
-                  name="selectedContact"
-                  checked={selectedContactId === contact.id}
-                  onChange={() => setSelectedContactId(contact.id)}
-                  className="mt-1"
-                  aria-label={`Select ${contact.fullName ?? contact.primaryEmail ?? "contact"}`}
-                />
-                <span>
-                  <span className="block text-sm font-semibold">{contact.fullName ?? contact.primaryEmail ?? "Unnamed contact"}</span>
-                  <span className="mt-1 block text-xs text-muted-foreground">
-                    {[contact.title, contact.organization].filter(Boolean).join(" / ") || "Role unavailable"}
-                  </span>
-                </span>
-                <span className="font-mono text-[0.7rem] uppercase tracking-[0.08em] text-muted-foreground">
-                  {contact.interactionCount} interactions
-                </span>
-                <Link href={`/contacts/${contact.id}`} className="font-mono text-[0.7rem] uppercase tracking-[0.08em] underline">
-                  Open profile
-                </Link>
-              </label>
+            {results.results.map((result) => (
+              <ResultRow
+                key={result.id}
+                result={result}
+                selected={selectedResultId === result.id}
+                onSelect={() => setSelectedResultId(result.id)}
+              />
             ))}
           </div>
         ) : (
           <div className="p-6 text-sm leading-6 text-muted-foreground">
-            {results ? "No results found in connected account data." : "Run a search to inspect real contacts from connected sources."}
+            {results ? (
+              <div>
+                <p className="font-semibold text-foreground">No sufficiently supported results matched this search.</p>
+                <ul className="mt-3 space-y-2">
+                  {results.emptyReasons.map((reason) => (
+                    <li key={reason}>{reason}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              "Run a search to inspect supported records from connected sources."
+            )}
           </div>
         )}
       </section>
@@ -228,4 +352,109 @@ export function ResearchConsole({
       ) : null}
     </div>
   );
+}
+
+function InterpretationRow({ label, values, warning = false }: { label: string; values: string[]; warning?: boolean }) {
+  return (
+    <div className="grid gap-3 px-4 py-3 md:grid-cols-[180px_1fr]">
+      <p className="eyebrow">{label}</p>
+      <div className="flex flex-wrap gap-2">
+        {values.length ? (
+          values.map((value) => (
+            <Badge key={value} variant={warning ? "warning" : "muted"}>
+              {value}
+            </Badge>
+          ))
+        ) : (
+          <span className="text-sm text-muted-foreground">Not specified</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ResultRow({ result, selected, onSelect }: { result: SearchResult; selected: boolean; onSelect: () => void }) {
+  const internalHref = result.href?.startsWith("/") ? result.href : null;
+  const externalHref = result.href && !result.href.startsWith("/") ? result.href : null;
+  return (
+    <label className="grid cursor-pointer gap-4 px-4 py-5 transition-colors hover:text-primary xl:grid-cols-[32px_1fr_220px]">
+      <input
+        type="radio"
+        name="selectedResult"
+        checked={selected}
+        onChange={onSelect}
+        className="mt-1"
+        aria-label={`Select ${result.title}`}
+      />
+      <span>
+        <span className="flex flex-wrap items-center gap-2">
+          <Badge variant="outline">{titleCase(result.entityType)}</Badge>
+          <Badge variant={result.classification === "AUTOMATED_SENDER" || result.classification === "MAILING_LIST" ? "warning" : "muted"}>
+            {titleCase(result.classification)}
+          </Badge>
+          <span className="font-mono text-[0.68rem] uppercase tracking-[0.12em] text-muted-foreground">
+            score {result.score} / confidence {result.confidence}
+          </span>
+        </span>
+        <span className="mt-3 block text-base font-semibold">{result.title}</span>
+        {result.subtitle ? <span className="mt-1 block text-xs leading-5 text-muted-foreground">{result.subtitle}</span> : null}
+        <span className="mt-3 block text-sm leading-6 text-muted-foreground">{result.whyMatched}</span>
+        <span className="mt-4 grid gap-3 lg:grid-cols-3">
+          <EvidenceList title="Evidence" items={result.evidence.filter((item) => item.state === "matched").slice(0, 4)} />
+          <EvidenceList title="Missing" items={result.missingCriteria.slice(0, 4)} />
+          <EvidenceList title="Unavailable" items={result.unavailableCriteria.slice(0, 4)} />
+        </span>
+        {result.classificationSignals.length ? (
+          <span className="mt-4 flex flex-wrap gap-2">
+            {result.classificationSignals.slice(0, 4).map((signal) => (
+              <Badge key={signal} variant="muted">
+                {signal}
+              </Badge>
+            ))}
+          </span>
+        ) : null}
+      </span>
+      <span className="space-y-2 xl:text-right">
+        <span className="block font-mono text-[0.68rem] uppercase tracking-[0.12em] text-muted-foreground">
+          {result.lastInteractionAt ? new Date(result.lastInteractionAt).toLocaleDateString() : "Date unavailable"}
+        </span>
+        {internalHref ? (
+          <Link href={internalHref} className="block font-mono text-[0.68rem] uppercase tracking-[0.12em] underline underline-offset-4">
+            Open
+          </Link>
+        ) : null}
+        {externalHref ? (
+          <a href={externalHref} target="_blank" rel="noreferrer" className="block font-mono text-[0.68rem] uppercase tracking-[0.12em] underline underline-offset-4">
+            Open source
+          </a>
+        ) : null}
+      </span>
+    </label>
+  );
+}
+
+function EvidenceList({ title, items }: { title: string; items: SearchEvidence[] }) {
+  return (
+    <span>
+      <span className="eyebrow mb-2 block">{title}</span>
+      {items.length ? (
+        <span className="space-y-2">
+          {items.map((item) => (
+            <span key={`${title}-${item.criterion}-${item.label}-${item.value ?? ""}`} className="block text-xs leading-5 text-muted-foreground">
+              {item.label}: {item.value ?? item.source}
+            </span>
+          ))}
+        </span>
+      ) : (
+        <span className="text-xs text-muted-foreground">None</span>
+      )}
+    </span>
+  );
+}
+
+function titleCase(value: string) {
+  return value
+    .toLowerCase()
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (match) => match.toUpperCase());
 }

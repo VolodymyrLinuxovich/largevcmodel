@@ -4,14 +4,9 @@ import { audit } from "@/lib/audit";
 import { canonicalizeUrl, dedupeSources } from "./sources";
 import { calculateFitScore, DEFAULT_SCORING_WEIGHTS } from "./scoring";
 import { researchWithConfiguredProvider } from "@/lib/research/provider";
+import { executeNetworkSearch, networkSearchRequestSchema, parseNetworkObjective } from "./network-search";
 
-export const queryRequestSchema = z.object({
-  query: z.string().min(2).max(1000),
-  stage: z.string().optional(),
-  sector: z.string().optional(),
-  geography: z.string().optional(),
-  relationshipStrength: z.coerce.number().min(0).max(10).optional(),
-});
+export const queryRequestSchema = networkSearchRequestSchema;
 
 export const researchRequestSchema = z.object({
   contactId: z.string().min(1).optional(),
@@ -27,14 +22,6 @@ function claimProvenance(value: string) {
   return ClaimProvenance.UNVERIFIED;
 }
 
-function terms(query: string) {
-  return query
-    .toLowerCase()
-    .split(/[^a-z0-9@.]+/)
-    .filter((term) => term.length > 2)
-    .slice(0, 12);
-}
-
 export function parseInvestmentIntent(input: {
   query: string;
   stage?: string;
@@ -42,59 +29,32 @@ export function parseInvestmentIntent(input: {
   geography?: string;
   relationshipStrength?: number;
 }) {
-  const lower = input.query.toLowerCase();
+  const parsed = parseNetworkObjective({ ...input, strictness: "balanced" });
   return {
-    sectors: input.sector ? [input.sector] : lower.includes("ai") ? ["AI"] : [],
-    stages: input.stage ? [input.stage] : lower.includes("seed") ? ["Seed"] : [],
-    geographies: input.geography
-      ? [input.geography]
-      : lower.includes("bay area") || lower.includes("san francisco")
-        ? ["Bay Area", "San Francisco"]
-        : [],
+    sectors: parsed.topics,
+    stages: parsed.fundingStages,
+    geographies: parsed.geographies,
     minimumRelationshipStrength: input.relationshipStrength,
     rawQuery: input.query,
   };
 }
 
 export async function executeResearchQuery(prisma: PrismaClient, userId: string, input: z.infer<typeof queryRequestSchema>) {
-  const intent = parseInvestmentIntent(input);
-  const searchTerms = terms(input.query);
-  const filters = [
-    ...searchTerms.flatMap((term) => [
-      { fullName: { contains: term, mode: "insensitive" as const } },
-      { primaryEmail: { contains: term, mode: "insensitive" as const } },
-      { organization: { contains: term, mode: "insensitive" as const } },
-      { title: { contains: term, mode: "insensitive" as const } },
-      { notes: { contains: term, mode: "insensitive" as const } },
-    ]),
-  ];
-
-  const contacts = await prisma.contact.findMany({
-    where: {
-      userId,
-      ...(filters.length ? { OR: filters } : {}),
-      ...(input.relationshipStrength !== undefined ? { relationshipStrength: { gte: input.relationshipStrength } } : {}),
-    },
-    include: {
-      company: true,
-      fitScores: { orderBy: { calculatedAt: "desc" }, take: 1 },
-      gmailThreads: { orderBy: { lastMessageAt: "desc" }, take: 2 },
-      calendarEvents: { orderBy: { startsAt: "desc" }, take: 2 },
-    },
-    orderBy: [{ relationshipStrength: "desc" }, { lastInteractionAt: "desc" }],
-    take: 25,
-  });
-
+  const result = await executeNetworkSearch(prisma, userId, input);
   await audit(prisma, {
     userId,
     actor: "LargeVCModel",
     action: "Network search completed",
     outcome: "completed",
     dataSource: "Connected account data",
-    details: `${contacts.length} matching contact records returned for a user query.`,
+    details: `${result.results.length} supported records returned from ${result.counts.candidates} candidates for a user query.`,
+    metadata: {
+      entityTypes: result.interpreted.entityTypes,
+      strictness: result.interpreted.strictness,
+      counts: result.counts,
+    },
   });
-
-  return { intent, contacts };
+  return result;
 }
 
 export async function researchSubject(prisma: PrismaClient, userId: string, input: z.infer<typeof researchRequestSchema>) {

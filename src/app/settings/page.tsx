@@ -25,6 +25,13 @@ export default async function SettingsPage() {
       <Section eyebrow="GOOGLE" title="Connected accounts">
         <IntegrationStatusPanel data={data} />
       </Section>
+      <Section eyebrow="PROFILE" title="Public profile">
+        <EmptyState
+          title="Profile data is owner controlled"
+          body="Create a public or connection-visible profile for products, projects, achievements, and platform activity. Private Gmail, Calendar, contacts, and OAuth data are never published by default."
+          action={<Button asChild><a href="/settings/profile">Edit Profile</a></Button>}
+        />
+      </Section>
       <Section eyebrow="RESEARCH" title="Provider status">
         <div className="grid border-y border-border lg:grid-cols-3">
           <div className="border-b border-border py-5 lg:border-b-0 lg:border-r lg:pr-6">

@@ -4,6 +4,7 @@ import { ContactInteractionType, ContactSource, IntegrationService, Prisma, Pris
 import { googleFetch, getConnectedIntegration } from "./api";
 import { audit } from "@/lib/audit";
 import { recalculateRelationshipStrength } from "@/lib/domain/relationships";
+import { classifyRecord } from "@/lib/domain/network-search";
 
 type GmailListResponse = { messages?: Array<{ id: string; threadId: string }>; nextPageToken?: string };
 type GmailMessageResponse = {
@@ -18,6 +19,11 @@ type GmailDraftResponse = { id: string; message?: { id?: string; threadId?: stri
 
 function header(message: GmailMessageResponse, name: string) {
   return message.payload?.headers?.find((item) => item.name.toLowerCase() === name.toLowerCase())?.value;
+}
+
+function selectedHeaders(message: GmailMessageResponse) {
+  const names = ["From", "To", "Cc", "Subject", "List-Unsubscribe", "List-Id", "Precedence", "Auto-Submitted"];
+  return Object.fromEntries(names.map((name) => [name, header(message, name) ?? null]));
 }
 
 function emailFromHeader(value?: string | null) {
@@ -95,11 +101,16 @@ export async function syncGmail(
       messageUrl.searchParams.append("metadataHeaders", "To");
       messageUrl.searchParams.append("metadataHeaders", "Cc");
       messageUrl.searchParams.append("metadataHeaders", "Subject");
+      messageUrl.searchParams.append("metadataHeaders", "List-Unsubscribe");
+      messageUrl.searchParams.append("metadataHeaders", "List-Id");
+      messageUrl.searchParams.append("metadataHeaders", "Precedence");
+      messageUrl.searchParams.append("metadataHeaders", "Auto-Submitted");
       const message = await googleFetch<GmailMessageResponse>(prisma, userId, IntegrationService.GMAIL, messageUrl.toString());
 
       const fromEmail = emailFromHeader(header(message, "From"));
       const toEmails = emailsFromHeader(header(message, "To"));
       const ccEmails = emailsFromHeader(header(message, "Cc"));
+      const headerMap = selectedHeaders(message);
       const ownEmail = integration.accountEmail?.toLowerCase();
       const participants = uniqueEmails([fromEmail, ...toEmails, ...ccEmails]);
       const externalParticipants = participants.filter((email) => email !== ownEmail && !isAutomatedEmail(email));
@@ -216,6 +227,28 @@ export async function syncGmail(
         },
       });
 
+      const priorMessages = await prisma.gmailMessage.findMany({
+        where: { threadId: thread.id },
+        select: { direction: true, headers: true },
+        take: 20,
+      });
+      const classification = classifyRecord({
+        entityType: "CONVERSATION",
+        title: header(message, "Subject") ?? thread.subject,
+        email: fromEmail,
+        messageDirections: [direction, ...priorMessages.map((item) => item.direction)],
+        headers: [headerMap, ...priorMessages.map((item) => (item.headers && typeof item.headers === "object" && !Array.isArray(item.headers) ? (item.headers as Record<string, unknown>) : null))],
+        labels: message.labelIds ?? [],
+      });
+      await prisma.gmailThread.update({
+        where: { id: thread.id },
+        data: {
+          entityClassification: classification.classification,
+          classificationConfidence: classification.confidence,
+          classificationSignals: classification.signals,
+        },
+      });
+
       await prisma.gmailMessage.upsert({
         where: { threadId_providerMessageId: { threadId: thread.id, providerMessageId: message.id } },
         create: {
@@ -227,11 +260,13 @@ export async function syncGmail(
           ccEmails,
           subject: header(message, "Subject") ?? null,
           snippet: message.snippet ?? null,
+          headers: headerMap as Prisma.InputJsonObject,
           internalDate: message.internalDate ? new Date(Number(message.internalDate)) : null,
           messageUrl: gmailThreadUrl(message.threadId),
         },
         update: {
           snippet: message.snippet ?? null,
+          headers: headerMap as Prisma.InputJsonObject,
           internalDate: message.internalDate ? new Date(Number(message.internalDate)) : null,
         },
       });
