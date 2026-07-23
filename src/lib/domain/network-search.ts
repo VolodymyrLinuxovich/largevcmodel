@@ -1,4 +1,4 @@
-import { ContactSource, IntegrationService, Prisma, PrismaClient } from "@prisma/client";
+import { ContactSource, Prisma, PrismaClient } from "@prisma/client";
 import { z } from "zod";
 
 export const entityTypeSchema = z.enum(["person", "company", "organization", "conversation", "meeting", "mixed"]);

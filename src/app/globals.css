@@ -91,3 +91,52 @@ a {
 .lvc-flow-controls button svg {
   fill: hsl(var(--foreground));
 }
+
+.animate-reveal {
+  animation: lvc-reveal 700ms ease-out both;
+}
+
+.animate-reveal-delay {
+  animation: lvc-reveal 800ms ease-out 120ms both;
+}
+
+.data-trace {
+  transform-origin: left center;
+  animation: lvc-trace 4.5s ease-in-out infinite;
+}
+
+.data-trace-delay {
+  animation-delay: 1.2s;
+}
+
+@keyframes lvc-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes lvc-trace {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: scaleX(0.18);
+  }
+  45%,
+  55% {
+    opacity: 0.85;
+    transform: scaleX(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-reveal,
+  .animate-reveal-delay,
+  .data-trace {
+    animation: none;
+  }
+}

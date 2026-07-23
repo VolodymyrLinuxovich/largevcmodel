@@ -8,6 +8,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": "/Users/volodymyrborysenko/Code/largevcmodel/src",
+      "server-only": "/Users/volodymyrborysenko/Code/largevcmodel/tests/server-only-shim.ts",
     },
   },
 });

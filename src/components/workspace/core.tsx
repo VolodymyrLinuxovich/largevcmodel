@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { IntegrationService, IntegrationStatus } from "@prisma/client";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatDate, formatTime } from "@/lib/utils";
 import { statusForService, type WorkspaceData } from "@/lib/workspace";

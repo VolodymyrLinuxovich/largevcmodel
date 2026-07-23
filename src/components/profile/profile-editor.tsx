@@ -262,7 +262,6 @@ export function ProfileEditor({
           <p className="eyebrow mb-4">PREVIEW</p>
           <div className="flex items-start gap-4">
             {avatarPreview ? (
-              // eslint-disable-next-line @next/next/no-img-element
               <img src={avatarPreview} alt="" className="h-16 w-16 rounded-sm border border-border object-cover" />
             ) : (
               <div className="h-16 w-16 border border-border" />

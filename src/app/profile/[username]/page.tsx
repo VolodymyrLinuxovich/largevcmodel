@@ -139,7 +139,6 @@ export default async function PublicProfilePage({ params }: { params: Promise<{ 
         <div className="grid gap-8 xl:grid-cols-[360px_1fr]">
           <div className="border-y border-border py-6">
             {profile.avatarUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
               <img src={profile.avatarUrl} alt="" className="h-28 w-28 rounded-sm border border-border object-cover" />
             ) : (
               <div className="h-28 w-28 border border-border" />

@@ -1,42 +1,63 @@
 import Link from "next/link";
-import { IntegrationService } from "@prisma/client";
 import { Button } from "@/components/ui/button";
+import { PeopleSearchWorkspace } from "@/components/people/people-search-workspace";
 import { EmptyState, HeroHeader, PageFrame, Section, SignInPanel } from "@/components/workspace/core";
-import { ResearchConsole } from "@/components/workspace/research-console";
-import { getWorkspaceData, integrationConnected } from "@/lib/workspace";
+import { getCurrentUser } from "@/lib/auth/current-user";
+import { getPeopleDiscoveryProviderStatus } from "@/lib/people/provider";
+import { prisma } from "@/lib/prisma";
+import { getWorkspaceData } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
 
-export default async function ResearchPage({
-  searchParams,
-}: {
-  searchParams?: Promise<{ q?: string }>;
-}) {
-  const data = await getWorkspaceData();
-  if (!data.user) return <SignInPanel data={data} />;
-  const { q = "" } = searchParams ? await searchParams : {};
-  const contactsConnected =
-    integrationConnected(data, IntegrationService.GOOGLE_CONTACTS) ||
-    integrationConnected(data, IntegrationService.GMAIL) ||
-    integrationConnected(data, IntegrationService.GOOGLE_CALENDAR);
-  const providerConfigured = data.configuration.researchProvider === "hermes" && data.configuration.researchConfigured;
+export default async function ResearchPage({ searchParams }: { searchParams?: Promise<{ q?: string }> }) {
+  const user = await getCurrentUser();
+  if (!user) {
+    const data = await getWorkspaceData();
+    return <SignInPanel data={data} />;
+  }
+
+  const [{ q = "" }, startups, providerStatus] = await Promise.all([
+    searchParams ? searchParams : Promise.resolve({ q: "" }),
+    prisma.startupProfile.findMany({
+      where: { userId: user.id },
+      orderBy: [{ isActive: "desc" }, { updatedAt: "desc" }],
+      include: {
+        pitchDecks: {
+          where: { deletedAt: null },
+          orderBy: { uploadedAt: "desc" },
+          take: 1,
+          select: { extractionStatus: true },
+        },
+      },
+    }),
+    getPeopleDiscoveryProviderStatus(),
+  ]);
 
   return (
     <PageFrame>
       <HeroHeader
-        eyebrow="RESEARCH / SOURCE DISCOVERY"
-        title="Investigate your network without losing provenance."
-        body="Search people, companies, organizations, conversations, and meetings from connected records. Public claims stay unavailable until a research provider can verify them."
-        actions={<Button asChild variant="outline"><Link href="/settings">Provider Settings</Link></Button>}
+        eyebrow="PEOPLE DISCOVERY / EXTERNAL INTELLIGENCE"
+        title="Find the people your company should know."
+        body="Search public people and investor sources from your startup profile, then enrich externally discovered candidates with private Gmail and Google Contacts relationship evidence."
+        actions={<Button asChild variant="outline"><Link href="/settings">Provider settings</Link></Button>}
       />
-      <Section title="Research workspace">
-        {!contactsConnected ? (
-          <EmptyState title="Connect relationship data first" body="Network search starts from real Contacts, Gmail, or Calendar records. Connect and sync at least one source before running a query." action={<Button asChild><Link href="/settings">Connect Sources</Link></Button>} />
-        ) : (
-          <ResearchConsole
-            providerConfigured={providerConfigured}
-            contactsConnected={contactsConnected}
+      <Section eyebrow="People search" title="External discovery first. Relationship data second.">
+        {startups.length ? (
+          <PeopleSearchWorkspace
             initialQuery={q}
+            providerStatus={providerStatus}
+            startups={startups.map((startup) => ({
+              id: startup.id,
+              name: startup.name,
+              profileCompleteness: startup.profileCompleteness,
+              pitchDeckStatus: startup.pitchDecks[0]?.extractionStatus ?? null,
+            }))}
+          />
+        ) : (
+          <EmptyState
+            title="Create a startup profile"
+            body="People discovery starts with your startup context or pitch deck. Create a profile before searching external people sources."
+            action={<Button asChild><Link href="/profile">Create startup profile</Link></Button>}
           />
         )}
       </Section>

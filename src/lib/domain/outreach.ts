@@ -35,8 +35,6 @@ export function generateOutreachDraft(contact: OutreachContact, sources: Outreac
   const version = options.version ?? "short";
   const format = options.format ?? "email";
   const goal = options.goal || "start a focused conversation";
-  const organization = contact.organization ? ` at ${contact.organization}` : "";
-  const role = contact.title ? `${contact.title}${organization}` : contact.organization || "your work";
   const sender = options.senderName || "LargeVCModel user";
   const evidenceClaims = sources.flatMap((source) => source.supportsClaims.map((claim) => ({ source, claim }))).slice(0, 3);
   const evidenceLine = evidenceClaims[0]
