@@ -3,13 +3,18 @@ import { z } from "zod";
 
 export const personTypeSchema = z.nativeEnum(PersonType);
 
+const optionalFilterNumber = z.preprocess(
+  (value) => (value === "" || value === null || value === undefined ? undefined : value),
+  z.coerce.number().int().min(0).optional().nullable(),
+);
+
 export const peopleSearchFiltersSchema = z.object({
   personTypes: z.array(personTypeSchema).default([]),
   industries: z.array(z.string().trim().min(1)).default([]),
   subIndustries: z.array(z.string().trim().min(1)).default([]),
   stages: z.array(z.string().trim().min(1)).default([]),
-  minCheckSize: z.coerce.number().int().min(0).optional().nullable(),
-  maxCheckSize: z.coerce.number().int().min(0).optional().nullable(),
+  minCheckSize: optionalFilterNumber,
+  maxCheckSize: optionalFilterNumber,
   locations: z.array(z.string().trim().min(1)).default([]),
   geographyPreferences: z.array(z.string().trim().min(1)).default([]),
   organizations: z.array(z.string().trim().min(1)).default([]),
@@ -27,7 +32,7 @@ export const peopleSearchFiltersSchema = z.object({
 });
 
 export const peopleSearchRequestSchema = z.object({
-  startupId: z.string().min(1),
+  startupId: z.string().trim().min(1).optional().nullable(),
   query: z.string().trim().min(2).max(1200),
   filters: peopleSearchFiltersSchema.default({}),
   limit: z.coerce.number().int().min(1).max(50).default(12),

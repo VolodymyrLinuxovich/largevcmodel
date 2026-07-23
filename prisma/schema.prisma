@@ -1070,7 +1070,7 @@ model PersonClaimSource {
 model PeopleSearchRun {
   id                  String               @id @default(cuid())
   userId              String
-  startupId           String
+  startupId           String?
   query               String
   interpretedCriteria Json
   filters             Json?
@@ -1089,7 +1089,7 @@ model PeopleSearchRun {
   completedAt         DateTime?
   createdAt           DateTime             @default(now())
   user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
-  startup             StartupProfile       @relation(fields: [startupId], references: [id], onDelete: Cascade)
+  startup             StartupProfile?      @relation(fields: [startupId], references: [id], onDelete: SetNull)
   results             PeopleSearchResult[]
   savedPersons        SavedPerson[]
 
@@ -1130,7 +1130,7 @@ model PeopleSearchResult {
 model PersonFitScore {
   id                       String           @id @default(cuid())
   userId                   String
-  startupId                String
+  startupId                String?
   personId                 String
   overall                  Int
   confidence               Int
@@ -1144,7 +1144,7 @@ model PersonFitScore {
   modelVersion             String
   calculatedAt             DateTime         @default(now())
   user                     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  startup                  StartupProfile   @relation(fields: [startupId], references: [id], onDelete: Cascade)
+  startup                  StartupProfile?  @relation(fields: [startupId], references: [id], onDelete: SetNull)
   person                   DiscoveredPerson @relation(fields: [personId], references: [id], onDelete: Cascade)
 
   @@index([userId, startupId, calculatedAt])

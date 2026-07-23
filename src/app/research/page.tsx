@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { PeopleSearchWorkspace } from "@/components/people/people-search-workspace";
-import { EmptyState, HeroHeader, PageFrame, Section, SignInPanel } from "@/components/workspace/core";
+import { HeroHeader, PageFrame, Section, SignInPanel } from "@/components/workspace/core";
 import { getCurrentUser } from "@/lib/auth/current-user";
 import { getPeopleDiscoveryProviderStatus } from "@/lib/people/provider";
 import { prisma } from "@/lib/prisma";
@@ -42,24 +42,16 @@ export default async function ResearchPage({ searchParams }: { searchParams?: Pr
         actions={<Button asChild variant="outline"><Link href="/settings">Provider settings</Link></Button>}
       />
       <Section eyebrow="People search" title="External discovery first. Relationship data second.">
-        {startups.length ? (
-          <PeopleSearchWorkspace
-            initialQuery={q}
-            providerStatus={providerStatus}
-            startups={startups.map((startup) => ({
-              id: startup.id,
-              name: startup.name,
-              profileCompleteness: startup.profileCompleteness,
-              pitchDeckStatus: startup.pitchDecks[0]?.extractionStatus ?? null,
-            }))}
-          />
-        ) : (
-          <EmptyState
-            title="Create a startup profile"
-            body="People discovery starts with your startup context or pitch deck. Create a profile before searching external people sources."
-            action={<Button asChild><Link href="/profile">Create startup profile</Link></Button>}
-          />
-        )}
+        <PeopleSearchWorkspace
+          initialQuery={q}
+          providerStatus={providerStatus}
+          startups={startups.map((startup) => ({
+            id: startup.id,
+            name: startup.name,
+            profileCompleteness: startup.profileCompleteness,
+            pitchDeckStatus: startup.pitchDecks[0]?.extractionStatus ?? null,
+          }))}
+        />
       </Section>
     </PageFrame>
   );

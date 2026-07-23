@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -31,6 +31,7 @@ type StartupDto = {
   targetGeographies: string[];
   traction?: string | null;
   revenue?: string | null;
+  growthMetrics?: Record<string, unknown> | null;
   customerCount?: number | null;
   pilots?: string | null;
   partnerships?: string | null;
@@ -117,37 +118,78 @@ export function StartupWorkspace({ startups }: { startups: StartupDto[] }) {
   const [activeSection, setActiveSection] = useState(sections[0]);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [completion, setCompletion] = useState(selected?.profileCompleteness ?? 0);
+  const [isSaving, setIsSaving] = useState(false);
+  const lastSavedPayloadRef = useRef(selected ? JSON.stringify(normalizeProfileForm(toForm(selected))) : "");
+  const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   function selectStartup(id: string) {
     setSelectedId(id);
     const next = startups.find((startup) => startup.id === id);
-    setForm(next ? toForm(next) : emptyForm);
+    const nextForm = next ? toForm(next) : emptyForm;
+    setForm(nextForm);
     setDeck(next?.pitchDeck ?? null);
+    setCompletion(next?.profileCompleteness ?? 0);
     setStatus(null);
     setError(null);
+    setFieldErrors({});
+    lastSavedPayloadRef.current = next ? JSON.stringify(normalizeProfileForm(nextForm)) : "";
   }
 
   async function saveProfile() {
+    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    await performSave();
+  }
+
+  async function performSave() {
     setStatus(null);
     setError(null);
-    startTransition(async () => {
-      try {
-        const response = await fetch("/api/startups", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(form),
-        });
-        const body = await response.json();
-        if (!response.ok) throw new Error(body.error ?? "Startup profile save failed.");
-        setForm(toForm(body.startup));
-        setSelectedId(body.startup.id);
-        setStatus("Startup profile saved.");
-      } catch (saveError) {
-        setError(saveError instanceof Error ? saveError.message : "Startup profile save failed.");
+    setIsSaving(true);
+    try {
+      const payload = normalizeProfileForm(form);
+      const response = await fetch("/api/startups", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const body = await response.json();
+      if (!response.ok) {
+        const fields = isFieldErrorResponse(body) ? body.fields : {};
+        setFieldErrors(fields);
+        throw new Error(firstFieldError(fields) ?? body.message ?? body.error ?? "Startup profile save failed.");
       }
-    });
+      const savedForm = toForm(body.startup);
+      setForm(savedForm);
+      setSelectedId(body.startup.id);
+      setCompletion(body.startup.profileCompleteness ?? 0);
+      setFieldErrors({});
+      lastSavedPayloadRef.current = JSON.stringify(normalizeProfileForm(savedForm));
+      setStatus("Saved");
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Startup profile save failed.");
+    } finally {
+      setIsSaving(false);
+    }
   }
+
+  useEffect(() => {
+    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    const normalized = normalizeProfileForm(form);
+    if (!normalized.name.trim()) {
+      setStatus(null);
+      return;
+    }
+    const payload = JSON.stringify(normalized);
+    if (payload === lastSavedPayloadRef.current || isSaving) return;
+    setStatus("Saving...");
+    autosaveTimerRef.current = setTimeout(() => {
+      void performSave();
+    }, 900);
+    return () => {
+      if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    };
+  }, [form, isSaving]);
 
   async function uploadDeck(file: File) {
     if (!form.id) {
@@ -218,51 +260,51 @@ export function StartupWorkspace({ startups }: { startups: StartupDto[] }) {
       case "Product":
         return (
           <FieldGroup>
-            <Field label="Product"><Textarea value={form.product ?? ""} onChange={(event) => update("product", event.target.value)} /></Field>
-            <Field label="Problem"><Textarea value={form.problem ?? ""} onChange={(event) => update("problem", event.target.value)} /></Field>
-            <Field label="Solution"><Textarea value={form.solution ?? ""} onChange={(event) => update("solution", event.target.value)} /></Field>
-            <Field label="Technologies"><Input value={join(form.technologies)} onChange={(event) => updateArray("technologies", event.target.value)} /></Field>
-            <Field label="Moat"><Textarea value={form.moat ?? ""} onChange={(event) => update("moat", event.target.value)} /></Field>
+            <Field label="Product" error={fieldErrors.product}><Textarea value={form.product ?? ""} onChange={(event) => update("product", event.target.value)} /></Field>
+            <Field label="Problem" error={fieldErrors.problem}><Textarea value={form.problem ?? ""} onChange={(event) => update("problem", event.target.value)} /></Field>
+            <Field label="Solution" error={fieldErrors.solution}><Textarea value={form.solution ?? ""} onChange={(event) => update("solution", event.target.value)} /></Field>
+            <Field label="Technologies" error={fieldErrors.technologies}><Input value={join(form.technologies)} onChange={(event) => updateArray("technologies", event.target.value)} /></Field>
+            <Field label="Moat" error={fieldErrors.moat}><Textarea value={form.moat ?? ""} onChange={(event) => update("moat", event.target.value)} /></Field>
           </FieldGroup>
         );
       case "Market":
         return (
           <FieldGroup>
-            <Field label="Industry"><Input value={form.industry ?? ""} onChange={(event) => update("industry", event.target.value)} /></Field>
-            <Field label="Sub-industries"><Input value={join(form.subIndustries)} onChange={(event) => updateArray("subIndustries", event.target.value)} /></Field>
-            <Field label="Target customers"><Textarea value={form.targetCustomers ?? ""} onChange={(event) => update("targetCustomers", event.target.value)} /></Field>
-            <Field label="Customer segments"><Input value={join(form.customerSegments)} onChange={(event) => updateArray("customerSegments", event.target.value)} /></Field>
-            <Field label="Target geographies"><Input value={join(form.targetGeographies)} onChange={(event) => updateArray("targetGeographies", event.target.value)} /></Field>
-            <Field label="Competitors"><Input value={join(form.competitors)} onChange={(event) => updateArray("competitors", event.target.value)} /></Field>
+            <Field label="Industry" error={fieldErrors.industry}><Input value={form.industry ?? ""} onChange={(event) => update("industry", event.target.value)} /></Field>
+            <Field label="Sub-industries" error={fieldErrors.subIndustries}><Input value={join(form.subIndustries)} onChange={(event) => updateArray("subIndustries", event.target.value)} /></Field>
+            <Field label="Target customers" error={fieldErrors.targetCustomers}><Textarea value={form.targetCustomers ?? ""} onChange={(event) => update("targetCustomers", event.target.value)} /></Field>
+            <Field label="Customer segments" error={fieldErrors.customerSegments}><Input value={join(form.customerSegments)} onChange={(event) => updateArray("customerSegments", event.target.value)} /></Field>
+            <Field label="Target geographies" error={fieldErrors.targetGeographies}><Input value={join(form.targetGeographies)} onChange={(event) => updateArray("targetGeographies", event.target.value)} /></Field>
+            <Field label="Competitors" error={fieldErrors.competitors}><Input value={join(form.competitors)} onChange={(event) => updateArray("competitors", event.target.value)} /></Field>
           </FieldGroup>
         );
       case "Traction":
         return (
           <FieldGroup>
-            <Field label="Traction"><Textarea value={form.traction ?? ""} onChange={(event) => update("traction", event.target.value)} /></Field>
-            <Field label="Revenue"><Input value={form.revenue ?? ""} onChange={(event) => update("revenue", event.target.value)} /></Field>
-            <Field label="Customer count"><Input type="number" value={form.customerCount ?? ""} onChange={(event) => updateNumber("customerCount", event.target.value)} /></Field>
-            <Field label="Pilots"><Textarea value={form.pilots ?? ""} onChange={(event) => update("pilots", event.target.value)} /></Field>
-            <Field label="Partnerships"><Textarea value={form.partnerships ?? ""} onChange={(event) => update("partnerships", event.target.value)} /></Field>
+            <Field label="Traction" error={fieldErrors.traction}><Textarea value={form.traction ?? ""} onChange={(event) => update("traction", event.target.value)} /></Field>
+            <Field label="Revenue" error={fieldErrors.revenue}><Input value={form.revenue ?? ""} onChange={(event) => update("revenue", event.target.value)} /></Field>
+            <Field label="Customer count" error={fieldErrors.customerCount}><Input type="number" value={form.customerCount ?? ""} onChange={(event) => updateNumber("customerCount", event.target.value)} /></Field>
+            <Field label="Pilots" error={fieldErrors.pilots}><Textarea value={form.pilots ?? ""} onChange={(event) => update("pilots", event.target.value)} /></Field>
+            <Field label="Partnerships" error={fieldErrors.partnerships}><Textarea value={form.partnerships ?? ""} onChange={(event) => update("partnerships", event.target.value)} /></Field>
           </FieldGroup>
         );
       case "Fundraising":
         return (
           <FieldGroup>
-            <Field label="Funding stage"><Input value={form.fundingStage ?? ""} onChange={(event) => update("fundingStage", event.target.value)} /></Field>
-            <Field label="Funding target"><Input type="number" value={form.fundingTarget ?? ""} onChange={(event) => updateNumber("fundingTarget", event.target.value)} /></Field>
-            <Field label="Minimum check size"><Input type="number" value={form.minCheckSize ?? ""} onChange={(event) => updateNumber("minCheckSize", event.target.value)} /></Field>
-            <Field label="Maximum check size"><Input type="number" value={form.maxCheckSize ?? ""} onChange={(event) => updateNumber("maxCheckSize", event.target.value)} /></Field>
-            <Field label="Fundraising status"><Textarea value={form.fundraisingStatus ?? ""} onChange={(event) => update("fundraisingStatus", event.target.value)} /></Field>
-            <Field label="Timeline"><Input value={form.fundraisingTimeline ?? ""} onChange={(event) => update("fundraisingTimeline", event.target.value)} /></Field>
+            <Field label="Funding stage" error={fieldErrors.fundingStage}><Input value={form.fundingStage ?? ""} onChange={(event) => update("fundingStage", event.target.value)} /></Field>
+            <Field label="Funding target" error={fieldErrors.fundingTarget}><Input type="number" value={form.fundingTarget ?? ""} onChange={(event) => updateNumber("fundingTarget", event.target.value)} /></Field>
+            <Field label="Minimum check size" error={fieldErrors.minCheckSize}><Input type="number" value={form.minCheckSize ?? ""} onChange={(event) => updateNumber("minCheckSize", event.target.value)} /></Field>
+            <Field label="Maximum check size" error={fieldErrors.maxCheckSize}><Input type="number" value={form.maxCheckSize ?? ""} onChange={(event) => updateNumber("maxCheckSize", event.target.value)} /></Field>
+            <Field label="Fundraising status" error={fieldErrors.fundraisingStatus}><Textarea value={form.fundraisingStatus ?? ""} onChange={(event) => update("fundraisingStatus", event.target.value)} /></Field>
+            <Field label="Timeline" error={fieldErrors.fundraisingTimeline}><Input value={form.fundraisingTimeline ?? ""} onChange={(event) => update("fundraisingTimeline", event.target.value)} /></Field>
           </FieldGroup>
         );
       case "Team":
         return (
           <FieldGroup>
-            <Field label="Team"><Textarea value={form.team ?? ""} onChange={(event) => update("team", event.target.value)} /></Field>
-            <Field label="Founder backgrounds"><Textarea value={form.founderBackgrounds ?? ""} onChange={(event) => update("founderBackgrounds", event.target.value)} /></Field>
-            <Field label="Headquarters"><Input value={form.headquarters ?? ""} onChange={(event) => update("headquarters", event.target.value)} /></Field>
+            <Field label="Team" error={fieldErrors.team}><Textarea value={form.team ?? ""} onChange={(event) => update("team", event.target.value)} /></Field>
+            <Field label="Founder backgrounds" error={fieldErrors.founderBackgrounds}><Textarea value={form.founderBackgrounds ?? ""} onChange={(event) => update("founderBackgrounds", event.target.value)} /></Field>
+            <Field label="Headquarters" error={fieldErrors.headquarters}><Input value={form.headquarters ?? ""} onChange={(event) => update("headquarters", event.target.value)} /></Field>
           </FieldGroup>
         );
       case "Pitch Deck":
@@ -316,11 +358,11 @@ export function StartupWorkspace({ startups }: { startups: StartupDto[] }) {
       case "Search Criteria":
         return (
           <FieldGroup>
-            <Field label="Preferred investor types"><Input value={join(form.preferredInvestorTypes)} onChange={(event) => updateArray("preferredInvestorTypes", event.target.value)} /></Field>
-            <Field label="Keywords"><Input value={join(form.keywords)} onChange={(event) => updateArray("keywords", event.target.value)} /></Field>
-            <Field label="Excluded investors"><Input value={join(form.excludedInvestors)} onChange={(event) => updateArray("excludedInvestors", event.target.value)} /></Field>
-            <Field label="Excluded organizations"><Input value={join(form.excludedOrganizations)} onChange={(event) => updateArray("excludedOrganizations", event.target.value)} /></Field>
-            <Field label="Custom notes"><Textarea value={form.customNotes ?? ""} onChange={(event) => update("customNotes", event.target.value)} /></Field>
+            <Field label="Preferred investor types" error={fieldErrors.preferredInvestorTypes}><Input value={join(form.preferredInvestorTypes)} onChange={(event) => updateArray("preferredInvestorTypes", event.target.value)} /></Field>
+            <Field label="Keywords" error={fieldErrors.keywords}><Input value={join(form.keywords)} onChange={(event) => updateArray("keywords", event.target.value)} /></Field>
+            <Field label="Excluded investors" error={fieldErrors.excludedInvestors}><Input value={join(form.excludedInvestors)} onChange={(event) => updateArray("excludedInvestors", event.target.value)} /></Field>
+            <Field label="Excluded organizations" error={fieldErrors.excludedOrganizations}><Input value={join(form.excludedOrganizations)} onChange={(event) => updateArray("excludedOrganizations", event.target.value)} /></Field>
+            <Field label="Custom notes" error={fieldErrors.customNotes}><Textarea value={form.customNotes ?? ""} onChange={(event) => update("customNotes", event.target.value)} /></Field>
           </FieldGroup>
         );
       case "Saved People":
@@ -339,26 +381,36 @@ export function StartupWorkspace({ startups }: { startups: StartupDto[] }) {
       default:
         return (
           <FieldGroup>
-            <Field label="Company name"><Input value={form.name} onChange={(event) => update("name", event.target.value)} required /></Field>
-            <Field label="Website"><Input value={form.website ?? ""} onChange={(event) => update("website", event.target.value)} /></Field>
-            <Field label="Logo URL"><Input value={form.logoUrl ?? ""} onChange={(event) => update("logoUrl", event.target.value)} /></Field>
-            <Field label="One-line description"><Input value={form.oneLineDescription ?? ""} onChange={(event) => update("oneLineDescription", event.target.value)} /></Field>
-            <Field label="Full description"><Textarea value={form.description ?? ""} onChange={(event) => update("description", event.target.value)} /></Field>
-            <Field label="Business model"><Input value={form.businessModel ?? ""} onChange={(event) => update("businessModel", event.target.value)} /></Field>
-            <Field label="Revenue model"><Input value={form.revenueModel ?? ""} onChange={(event) => update("revenueModel", event.target.value)} /></Field>
+            <Field label="Company name" error={fieldErrors.name}><Input value={form.name} onChange={(event) => update("name", event.target.value)} required /></Field>
+            <Field label="Website" error={fieldErrors.website}><Input value={form.website ?? ""} onChange={(event) => update("website", event.target.value)} /></Field>
+            <Field label="Logo URL" error={fieldErrors.logoUrl}><Input value={form.logoUrl ?? ""} onChange={(event) => update("logoUrl", event.target.value)} /></Field>
+            <Field label="One-line description" error={fieldErrors.oneLineDescription}><Input value={form.oneLineDescription ?? ""} onChange={(event) => update("oneLineDescription", event.target.value)} /></Field>
+            <Field label="Full description" error={fieldErrors.description}><Textarea value={form.description ?? ""} onChange={(event) => update("description", event.target.value)} /></Field>
+            <Field label="Business model" error={fieldErrors.businessModel}><Input value={form.businessModel ?? ""} onChange={(event) => update("businessModel", event.target.value)} /></Field>
+            <Field label="Revenue model" error={fieldErrors.revenueModel}><Input value={form.revenueModel ?? ""} onChange={(event) => update("revenueModel", event.target.value)} /></Field>
           </FieldGroup>
         );
     }
-  }, [activeSection, deck, form, selected]);
+  }, [activeSection, deck, fieldErrors, form, selected]);
 
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
-    setForm((current) => ({ ...current, [key]: value || undefined }));
+    clearFieldError(String(key));
+    setForm((current) => ({ ...current, [key]: value }));
   }
   function updateArray(key: keyof FormState, value: string) {
+    clearFieldError(String(key));
     setForm((current) => ({ ...current, [key]: split(value) }));
   }
   function updateNumber(key: keyof FormState, value: string) {
+    clearFieldError(String(key));
     setForm((current) => ({ ...current, [key]: value === "" ? null : Number(value) }));
+  }
+  function clearFieldError(key: string) {
+    setFieldErrors((current) => {
+      if (!current[key]) return current;
+      const { [key]: _removed, ...rest } = current;
+      return rest;
+    });
   }
 
   return (
@@ -376,12 +428,12 @@ export function StartupWorkspace({ startups }: { startups: StartupDto[] }) {
             {startups.map((startup) => <option key={startup.id} value={startup.id}>{startup.name}</option>)}
             <option value="new">New startup</option>
           </select>
-          <Button type="button" onClick={saveProfile} disabled={isPending || !form.name.trim()}>{isPending ? "Saving..." : "Save profile"}</Button>
+          <Button type="button" onClick={saveProfile} disabled={isSaving}>{isSaving ? "Saving..." : "Save profile"}</Button>
         </div>
       </div>
 
       <div className="flex flex-wrap gap-2">
-        <Badge variant="outline">{selected?.profileCompleteness ?? 0}% complete</Badge>
+        <Badge variant="outline">{completion}% complete</Badge>
         <Badge variant="muted">{deck?.extractionStatus ?? "No deck"}</Badge>
         {selected?.updatedAt ? <Badge variant="muted">Updated {new Date(selected.updatedAt).toLocaleDateString()}</Badge> : null}
       </div>
@@ -416,13 +468,61 @@ function FieldGroup({ children }: { children: React.ReactNode }) {
   return <div className="grid gap-5">{children}</div>;
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, children, error }: { label: string; children: React.ReactNode; error?: string }) {
   return (
     <label className="grid gap-3 border-b border-border pb-5 md:grid-cols-[220px_1fr] md:items-start">
       <span className="eyebrow pt-3">{label}</span>
-      <span>{children}</span>
+      <span>
+        {children}
+        {error ? <span className="mt-2 block text-xs leading-5 text-[hsl(39_42%_68%)]">{error}</span> : null}
+      </span>
     </label>
   );
+}
+
+function normalizeProfileForm(form: FormState) {
+  return {
+    id: textOrUndefined(form.id),
+    name: form.name.trim(),
+    website: normalizeUrl(form.website),
+    logoUrl: normalizeUrl(form.logoUrl),
+    oneLineDescription: nullableText(form.oneLineDescription),
+    description: nullableText(form.description),
+    industry: nullableText(form.industry),
+    subIndustries: cleanArray(form.subIndustries),
+    product: nullableText(form.product),
+    problem: nullableText(form.problem),
+    solution: nullableText(form.solution),
+    targetCustomers: nullableText(form.targetCustomers),
+    customerSegments: cleanArray(form.customerSegments),
+    businessModel: nullableText(form.businessModel),
+    revenueModel: nullableText(form.revenueModel),
+    fundingStage: nullableText(form.fundingStage),
+    fundingTarget: nullableNumber(form.fundingTarget),
+    minCheckSize: nullableNumber(form.minCheckSize),
+    maxCheckSize: nullableNumber(form.maxCheckSize),
+    headquarters: nullableText(form.headquarters),
+    targetGeographies: cleanArray(form.targetGeographies),
+    traction: nullableText(form.traction),
+    revenue: nullableText(form.revenue),
+    growthMetrics: form.growthMetrics ?? null,
+    customerCount: nullableNumber(form.customerCount),
+    pilots: nullableText(form.pilots),
+    partnerships: nullableText(form.partnerships),
+    team: nullableText(form.team),
+    founderBackgrounds: nullableText(form.founderBackgrounds),
+    keywords: cleanArray(form.keywords),
+    technologies: cleanArray(form.technologies),
+    moat: nullableText(form.moat),
+    competitors: cleanArray(form.competitors),
+    preferredInvestorTypes: cleanArray(form.preferredInvestorTypes),
+    excludedInvestors: cleanArray(form.excludedInvestors),
+    excludedOrganizations: cleanArray(form.excludedOrganizations),
+    fundraisingStatus: nullableText(form.fundraisingStatus),
+    fundraisingTimeline: nullableText(form.fundraisingTimeline),
+    customNotes: nullableText(form.customNotes),
+    searchCriteria: form.searchCriteria ?? null,
+  };
 }
 
 function toForm(startup: Partial<StartupDto>): FormState {
@@ -453,4 +553,36 @@ function join(value?: string[]) {
 
 function labelize(value: string) {
   return value.replace(/([A-Z])/g, " $1").replace(/^./, (match) => match.toUpperCase());
+}
+
+function textOrUndefined(value?: string | null) {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function nullableText(value?: string | null) {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+}
+
+function normalizeUrl(value?: string | null) {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+
+function nullableNumber(value?: number | null) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function cleanArray(value?: string[]) {
+  return Array.from(new Set((value ?? []).map((item) => item.trim()).filter(Boolean)));
+}
+
+function isFieldErrorResponse(value: unknown): value is { fields: Record<string, string>; message?: string; error?: string } {
+  return Boolean(value && typeof value === "object" && "fields" in value && typeof (value as { fields?: unknown }).fields === "object");
+}
+
+function firstFieldError(fields: Record<string, string>) {
+  return Object.values(fields)[0];
 }

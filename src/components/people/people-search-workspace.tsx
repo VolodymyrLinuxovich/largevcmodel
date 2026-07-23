@@ -121,7 +121,7 @@ export function PeopleSearchWorkspace({
         const result = await fetch("/api/people/search", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ startupId, query, filters, limit: 12, offset: 0 }),
+          body: JSON.stringify({ startupId: startupId || undefined, query, filters, limit: 12, offset: 0 }),
         });
         const body = await result.json();
         if (!result.ok) throw new Error(body.error ?? "People search failed.");
@@ -138,7 +138,7 @@ export function PeopleSearchWorkspace({
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         personId: result.person.id,
-        startupId,
+        startupId: startupId || undefined,
         searchRunId: response?.searchRunId,
         searchResultId: result.id,
         savedReason: result.explanation,
@@ -158,18 +158,6 @@ export function PeopleSearchWorkspace({
     }
   }
 
-  if (!startups.length) {
-    return (
-      <div className="border-y border-dashed border-border py-12">
-        <p className="text-sm font-medium uppercase tracking-[0.08em] text-foreground">Create a startup profile first.</p>
-        <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
-          People discovery starts from your startup profile or pitch deck. Gmail and Google Contacts can enrich candidates after external discovery, but cannot create the candidate set.
-        </p>
-        <Button asChild className="mt-6"><Link href="/profile">Create startup profile</Link></Button>
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-10">
       <section className="border-y border-border py-6">
@@ -184,7 +172,7 @@ export function PeopleSearchWorkspace({
               aria-label="People search objective"
             />
             <div className="mt-4 flex flex-wrap gap-3">
-              <Button onClick={search} disabled={!startupId || query.trim().length < 2 || isPending}>
+              <Button onClick={search} disabled={query.trim().length < 2 || isPending}>
                 {isPending ? "Searching..." : "Search external people"}
               </Button>
               <Button type="button" variant="outline" onClick={() => setShowFilters((value) => !value)}>
@@ -195,13 +183,21 @@ export function PeopleSearchWorkspace({
           <aside className="space-y-4">
             <div>
               <p className="eyebrow mb-2">Startup context</p>
-              <Select value={startupId} onChange={(event) => setStartupId(event.target.value)} aria-label="Startup profile">
-                {startups.map((startup) => <option key={startup.id} value={startup.id}>{startup.name}</option>)}
-              </Select>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <Badge variant="muted">{selectedStartup?.profileCompleteness ?? 0}% complete</Badge>
-                <Badge variant="muted">{selectedStartup?.pitchDeckStatus ?? "No deck"}</Badge>
-              </div>
+              {startups.length ? (
+                <>
+                  <Select value={startupId} onChange={(event) => setStartupId(event.target.value)} aria-label="Startup profile">
+                    {startups.map((startup) => <option key={startup.id} value={startup.id}>{startup.name}</option>)}
+                  </Select>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Badge variant="muted">{selectedStartup?.profileCompleteness ?? 0}% complete</Badge>
+                    <Badge variant="muted">{selectedStartup?.pitchDeckStatus ?? "No deck"}</Badge>
+                  </div>
+                </>
+              ) : (
+                <p className="text-sm leading-6 text-muted-foreground">
+                  No saved startup profile. Search will use your plain-language objective and filters only.
+                </p>
+              )}
             </div>
             <div className="border-y border-border py-4">
               <p className="eyebrow mb-2">Provider</p>

@@ -3,26 +3,75 @@ import "server-only";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { z } from "zod";
 
+const textKeys = [
+  "oneLineDescription",
+  "description",
+  "industry",
+  "product",
+  "problem",
+  "solution",
+  "targetCustomers",
+  "businessModel",
+  "revenueModel",
+  "fundingStage",
+  "headquarters",
+  "traction",
+  "revenue",
+  "pilots",
+  "partnerships",
+  "team",
+  "founderBackgrounds",
+  "moat",
+  "fundraisingStatus",
+  "fundraisingTimeline",
+  "customNotes",
+] as const;
+
+const arrayKeys = [
+  "subIndustries",
+  "customerSegments",
+  "targetGeographies",
+  "keywords",
+  "technologies",
+  "competitors",
+  "preferredInvestorTypes",
+  "excludedInvestors",
+  "excludedOrganizations",
+] as const;
+
+const numberKeys = ["fundingTarget", "minCheckSize", "maxCheckSize", "customerCount"] as const;
+
 const optionalUrl = z
   .string()
-  .trim()
-  .optional()
-  .transform((value) => value || undefined)
-  .pipe(z.string().url().optional());
+  .url("Enter a valid URL.")
+  .nullable()
+  .default(null);
 
 const optionalText = (max = 4000) =>
   z
     .string()
     .trim()
     .max(max)
-    .optional()
-    .transform((value) => value || undefined);
+    .nullable()
+    .default(null);
 
 const stringArray = z.array(z.string().trim().min(1).max(160)).max(80).default([]);
+const optionalNumber = (max: number) =>
+  z
+    .number({ invalid_type_error: "Enter a valid number." })
+    .int("Enter a whole number.")
+    .min(0, "Enter a positive number.")
+    .max(max, "Enter a smaller number.")
+    .nullable()
+    .default(null);
+const optionalCriteriaNumber = z.preprocess(
+  (value) => (value === "" || value === null || value === undefined ? null : value),
+  z.coerce.number({ invalid_type_error: "Enter a valid number." }).int("Enter a whole number.").min(0, "Enter a positive number.").nullable().default(null),
+);
 
-export const startupProfileInputSchema = z.object({
+export const startupProfileInputSchema = z.preprocess(normalizeStartupProfileInput, z.object({
   id: z.string().optional(),
-  name: z.string().trim().min(1).max(160),
+  name: z.string().trim().min(1, "Company name is required.").max(160, "Company name must be 160 characters or fewer."),
   website: optionalUrl,
   logoUrl: optionalUrl,
   oneLineDescription: optionalText(220),
@@ -37,15 +86,15 @@ export const startupProfileInputSchema = z.object({
   businessModel: optionalText(1000),
   revenueModel: optionalText(1000),
   fundingStage: optionalText(80),
-  fundingTarget: z.coerce.number().int().min(0).max(10_000_000_000).optional().nullable(),
-  minCheckSize: z.coerce.number().int().min(0).max(10_000_000_000).optional().nullable(),
-  maxCheckSize: z.coerce.number().int().min(0).max(10_000_000_000).optional().nullable(),
+  fundingTarget: optionalNumber(10_000_000_000),
+  minCheckSize: optionalNumber(10_000_000_000),
+  maxCheckSize: optionalNumber(10_000_000_000),
   headquarters: optionalText(160),
   targetGeographies: stringArray,
   traction: optionalText(2000),
   revenue: optionalText(1000),
-  growthMetrics: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
-  customerCount: z.coerce.number().int().min(0).max(10_000_000).optional().nullable(),
+  growthMetrics: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).nullable().default(null),
+  customerCount: optionalNumber(10_000_000),
   pilots: optionalText(2000),
   partnerships: optionalText(2000),
   team: optionalText(2000),
@@ -60,8 +109,8 @@ export const startupProfileInputSchema = z.object({
   fundraisingStatus: optionalText(1000),
   fundraisingTimeline: optionalText(1000),
   customNotes: optionalText(4000),
-  searchCriteria: z.record(z.string(), z.unknown()).optional(),
-});
+  searchCriteria: z.record(z.string(), z.unknown()).nullable().default(null),
+}));
 
 export const startupCriteriaSchema = z.object({
   targetPersonTypes: stringArray,
@@ -69,8 +118,8 @@ export const startupCriteriaSchema = z.object({
   targetIndustries: stringArray,
   targetSubIndustries: stringArray,
   targetStages: stringArray,
-  minCheckSize: z.coerce.number().int().min(0).optional().nullable(),
-  maxCheckSize: z.coerce.number().int().min(0).optional().nullable(),
+  minCheckSize: optionalCriteriaNumber,
+  maxCheckSize: optionalCriteriaNumber,
   targetLocations: stringArray,
   geographyPreferences: stringArray,
   targetOrganizations: stringArray,
@@ -89,6 +138,45 @@ export const startupCriteriaSchema = z.object({
 
 export type StartupProfileInput = z.infer<typeof startupProfileInputSchema>;
 export type StartupCriteriaInput = z.infer<typeof startupCriteriaSchema>;
+
+export function normalizeStartupProfileInput(value: unknown) {
+  const input = value && typeof value === "object" && !Array.isArray(value) ? { ...(value as Record<string, unknown>) } : {};
+  if (typeof input.companyName === "string" && typeof input.name !== "string") input.name = input.companyName;
+  const normalized: Record<string, unknown> = {
+    id: blankToUndefined(input.id),
+    name: typeof input.name === "string" ? input.name.trim() : "",
+    website: normalizeOptionalUrl(input.website),
+    logoUrl: normalizeOptionalUrl(input.logoUrl),
+    growthMetrics: objectOrNull(input.growthMetrics),
+    searchCriteria: objectOrNull(input.searchCriteria),
+  };
+
+  for (const key of textKeys) normalized[key] = normalizeNullableText(input[key]);
+  for (const key of arrayKeys) normalized[key] = normalizeStringArray(input[key]);
+  for (const key of numberKeys) normalized[key] = normalizeNullableNumber(input[key]);
+  return normalized;
+}
+
+export function normalizeOptionalUrl(value: unknown) {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string") return value;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) return trimmed;
+  return `https://${trimmed}`;
+}
+
+export function normalizeStringArray(value: unknown) {
+  const raw = typeof value === "string" ? value.split(",") : Array.isArray(value) ? value : [];
+  return Array.from(new Set(raw.map((item) => (typeof item === "string" ? item.trim() : "")).filter(Boolean)));
+}
+
+export function normalizeNullableNumber(value: unknown) {
+  if (value === null || value === undefined || value === "") return null;
+  if (typeof value === "string" && !value.trim()) return null;
+  const number = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(number) ? number : value;
+}
 
 const completenessFields: Array<keyof StartupProfileInput> = [
   "name",
@@ -167,8 +255,8 @@ type StartupProfileData = Omit<Prisma.StartupProfileUncheckedCreateInput, "id" |
 function startupData(input: StartupProfileInput): StartupProfileData {
   return {
     name: input.name,
-    website: input.website,
-    logoUrl: input.logoUrl,
+    website: input.website ?? null,
+    logoUrl: input.logoUrl ?? null,
     oneLineDescription: input.oneLineDescription,
     description: input.description,
     industry: input.industry,
@@ -188,7 +276,7 @@ function startupData(input: StartupProfileInput): StartupProfileData {
     targetGeographies: input.targetGeographies,
     traction: input.traction,
     revenue: input.revenue,
-    growthMetrics: input.growthMetrics as Prisma.InputJsonObject | undefined,
+    growthMetrics: input.growthMetrics ? (input.growthMetrics as Prisma.InputJsonObject) : Prisma.JsonNull,
     customerCount: input.customerCount ?? null,
     pilots: input.pilots,
     partnerships: input.partnerships,
@@ -204,7 +292,22 @@ function startupData(input: StartupProfileInput): StartupProfileData {
     fundraisingStatus: input.fundraisingStatus,
     fundraisingTimeline: input.fundraisingTimeline,
     customNotes: input.customNotes,
-    searchCriteria: input.searchCriteria as Prisma.InputJsonObject | undefined,
+    searchCriteria: input.searchCriteria ? (input.searchCriteria as Prisma.InputJsonObject) : Prisma.JsonNull,
     profileCompleteness: calculateStartupCompleteness(input),
   };
+}
+
+function normalizeNullableText(value: unknown) {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string") return value;
+  const trimmed = value.trim();
+  return trimmed || null;
+}
+
+function blankToUndefined(value: unknown) {
+  return typeof value === "string" && value.trim() === "" ? undefined : value;
+}
+
+function objectOrNull(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : null;
 }

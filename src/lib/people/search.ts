@@ -100,19 +100,22 @@ type PersonWithRelations = DiscoveredPerson & {
 
 export async function searchPeople(prisma: PrismaClient, userId: string, rawInput: PeopleSearchRequest): Promise<PeopleSearchResponse> {
   const input = peopleSearchRequestSchema.parse(rawInput);
-  const startup = await loadStartupProfile(prisma, userId, input.startupId);
-  if (!startup) throw new Error("Startup profile not found.");
+  const requestedStartup = input.startupId ? await loadStartupProfile(prisma, userId, input.startupId) : null;
+  if (input.startupId && !requestedStartup) throw new Error("Startup profile not found.");
+  const defaultStartup = input.startupId ? null : await loadStartupProfile(prisma, userId);
+  const savedStartup = requestedStartup ?? defaultStartup;
 
   const interpretedCriteria = interpretPeopleSearchObjective({
     query: input.query,
     filters: input.filters,
-    startupCriteria: startup.searchCriteria,
+    startupCriteria: savedStartup?.searchCriteria ?? null,
   });
+  const startup = savedStartup ?? searchOnlyStartupContext(userId, input, interpretedCriteria);
   const initialProviderStatus = await getPeopleDiscoveryProviderStatus();
   const run = await prisma.peopleSearchRun.create({
     data: {
       userId,
-      startupId: startup.id,
+      startupId: savedStartup?.id ?? null,
       query: input.query,
       interpretedCriteria: interpretedCriteria as unknown as Prisma.InputJsonObject,
       filters: input.filters as unknown as Prisma.InputJsonObject,
@@ -130,7 +133,7 @@ export async function searchPeople(prisma: PrismaClient, userId: string, rawInpu
     outcome: "running",
     dataSource: "External research provider",
     details: input.query,
-    metadata: { startupId: startup.id, provider: initialProviderStatus.name },
+    metadata: { startupId: savedStartup?.id ?? null, provider: initialProviderStatus.name },
   });
 
   const provider = getConfiguredPeopleDiscoveryProvider();
@@ -209,7 +212,13 @@ export async function searchPeople(prisma: PrismaClient, userId: string, rawInpu
   }
 
   const persistedIds: string[] = [];
-  await upsertEmbedding(prisma, userId, "startup_profile", startup.id, JSON.stringify(startupSnapshot(startup)));
+  await upsertEmbedding(
+    prisma,
+    userId,
+    savedStartup ? "startup_profile" : "search_context",
+    savedStartup?.id ?? run.id,
+    JSON.stringify(startupSnapshot(startup)),
+  );
   for (const candidate of providerResult.people) {
     const saved = await persistProviderPerson(prisma, userId, providerResult.provider, candidate);
     if (saved) persistedIds.push(saved.id);
@@ -317,6 +326,67 @@ async function upsertEmbedding(prisma: PrismaClient, userId: string, entityType:
   });
 }
 
+export function searchOnlyStartupContext(userId: string, input: PeopleSearchRequest, interpreted: InterpretedPeopleCriteria): StartupProfile {
+  const now = new Date();
+  const industry = input.filters.industries[0] ?? interpreted.industries[0] ?? null;
+  const targetGeographies = uniqueStrings([...input.filters.locations, ...interpreted.locations, ...interpreted.geographyPreferences]);
+  const technologies = uniqueStrings([...input.filters.technologyKeywords, ...interpreted.technologyKeywords]);
+  const keywords = uniqueStrings([
+    ...input.filters.portfolioKeywords,
+    ...interpreted.portfolioKeywords,
+    ...interpreted.industries,
+    ...interpreted.titles,
+  ]);
+
+  return {
+    id: "search-context",
+    userId,
+    name: "Search criteria",
+    website: null,
+    logoUrl: null,
+    oneLineDescription: input.query,
+    description: input.query,
+    industry,
+    subIndustries: uniqueStrings([...input.filters.subIndustries, ...interpreted.industries]),
+    product: input.query,
+    problem: null,
+    solution: null,
+    targetCustomers: null,
+    customerSegments: [],
+    businessModel: null,
+    revenueModel: null,
+    fundingStage: input.filters.stages[0] ?? interpreted.stages[0] ?? null,
+    fundingTarget: null,
+    minCheckSize: input.filters.minCheckSize ?? interpreted.checkSizeMin ?? null,
+    maxCheckSize: input.filters.maxCheckSize ?? interpreted.checkSizeMax ?? null,
+    headquarters: null,
+    targetGeographies,
+    traction: null,
+    revenue: null,
+    growthMetrics: null,
+    customerCount: null,
+    pilots: null,
+    partnerships: null,
+    team: null,
+    founderBackgrounds: null,
+    keywords,
+    technologies,
+    moat: null,
+    competitors: [],
+    preferredInvestorTypes: interpreted.personTypes.map((type) => type.toLowerCase().replaceAll("_", " ")),
+    excludedInvestors: [],
+    excludedOrganizations: interpreted.excludedTerms,
+    fundraisingStatus: null,
+    fundraisingTimeline: null,
+    customNotes: null,
+    searchCriteria: null,
+    profileCompleteness: 0,
+    isActive: false,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
 function startupSnapshot(startup: StartupProfile) {
   return {
     id: startup.id,
@@ -342,6 +412,10 @@ function startupSnapshot(startup: StartupProfile) {
     excludedOrganizations: startup.excludedOrganizations,
     searchCriteria: startup.searchCriteria,
   };
+}
+
+function uniqueStrings(values: string[]) {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
 }
 
 function passesStructuredFilters(
