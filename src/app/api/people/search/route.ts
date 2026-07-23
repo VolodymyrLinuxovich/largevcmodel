@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { searchPeople } from "@/lib/people/search";
 import { peopleSearchRequestSchema } from "@/lib/people/types";
 
+export const maxDuration = 60;
+
 export async function POST(request: Request) {
   try {
     const user = await requireCurrentUser();

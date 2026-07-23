@@ -1,5 +1,6 @@
 import { PersonType, type DiscoveredPerson, type PersonRelationshipEnrichment, type StartupProfile } from "@prisma/client";
 import { fullTextScore, semanticSimilarity } from "./semantic";
+import { expandGeographyTerms, expandIndustryTerms, expandStageTerms } from "./search-taxonomy";
 
 export type CriterionState = {
   criterion: string;
@@ -61,18 +62,24 @@ export function calculatePeopleFitScore(input: {
   const stageScore = stageOverlap(input.startup.fundingStage, input.person.preferredStages);
   if (weights.stage > 0) pushState(stageScore, "Funding-stage fit", "Stage", input.person.preferredStages.join(", "), matched, missing, uncertain);
 
-  const technologyScore = overlapScore([...input.startup.technologies, ...input.startup.keywords], [...input.person.technologies, ...input.person.keywords, ...input.person.skills]);
+  const technologyScore = overlapScore(
+    expandIndustryTerms([...input.startup.technologies, ...input.startup.keywords]),
+    expandIndustryTerms([...input.person.technologies, ...input.person.keywords, ...input.person.skills]),
+  );
   pushState(technologyScore, "Product and technology fit", "Technology", input.person.technologies.join(", "), matched, missing, uncertain);
 
   const checkScore = checkSizeScore(input.startup.minCheckSize, input.startup.maxCheckSize, input.person.minCheckSize, input.person.maxCheckSize);
   if (weights.checkSize > 0) pushState(checkScore, "Check-size fit", "Check range", checkRange(input.person.minCheckSize, input.person.maxCheckSize), matched, missing, uncertain);
 
-  const geographyScore = overlapScore(input.startup.targetGeographies, [...input.person.geographyPreferences, input.person.location].filter(Boolean) as string[]);
+  const geographyScore = overlapScore(
+    expandGeographyTerms(input.startup.targetGeographies),
+    expandGeographyTerms([...input.person.geographyPreferences, input.person.location].filter(Boolean) as string[]),
+  );
   pushState(geographyScore, "Geography fit", "Geography", [input.person.location, ...input.person.geographyPreferences].filter(Boolean).join(", "), matched, missing, uncertain);
 
   const portfolioScore = overlapScore(
-    [...input.startup.subIndustries, ...input.startup.customerSegments, input.startup.product ?? ""],
-    [...input.person.portfolioCompanies, ...input.person.notableInvestments, input.person.notableExperience ?? "", input.person.biography ?? ""],
+    expandIndustryTerms([...input.startup.subIndustries, ...input.startup.customerSegments, input.startup.product ?? ""]),
+    expandIndustryTerms([...input.person.portfolioCompanies, ...input.person.notableInvestments, input.person.notableExperience ?? "", input.person.biography ?? ""]),
   );
   pushState(portfolioScore, "Portfolio or operating relevance", "Relevant experience", input.person.portfolioCompanies.slice(0, 4).join(", ") || input.person.notableExperience, matched, missing, uncertain);
 
@@ -195,8 +202,9 @@ function overlapScore(left: string[], right: string[]) {
 function stageOverlap(stage: string | null, preferred: string[]) {
   if (!stage && !preferred.length) return 0;
   if (!stage || !preferred.length) return 18;
-  const normalized = stage.toLowerCase().replace(/\s+/g, "-");
-  return preferred.some((item) => item.toLowerCase().replace(/\s+/g, "-").includes(normalized) || normalized.includes(item.toLowerCase().replace(/\s+/g, "-"))) ? 100 : 15;
+  const requested = expandStageTerms([stage]).map((item) => item.toLowerCase().replace(/\s+/g, "-"));
+  const available = expandStageTerms(preferred).map((item) => item.toLowerCase().replace(/\s+/g, "-"));
+  return requested.some((left) => available.some((right) => right.includes(left) || left.includes(right))) ? 100 : 15;
 }
 
 function checkSizeScore(startupMin: number | null, startupMax: number | null, personMin: number | null, personMax: number | null) {

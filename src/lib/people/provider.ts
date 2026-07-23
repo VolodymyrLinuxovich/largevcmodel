@@ -28,6 +28,7 @@ export function getConfiguredPeopleDiscoveryProvider(): PeopleDiscoveryProvider 
     return new OpenAIPeopleDiscoveryProvider({
       apiKey: process.env.OPENAI_API_KEY,
       model: process.env.OPENAI_MODEL,
+      webSearchToolType: process.env.OPENAI_WEB_SEARCH_TOOL,
     });
   }
   return null;

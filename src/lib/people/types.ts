@@ -1,7 +1,13 @@
 import { PersonType, ProviderHealthStatus } from "@prisma/client";
 import { z } from "zod";
+import { splitListInput } from "./search-taxonomy";
 
 export const personTypeSchema = z.nativeEnum(PersonType);
+
+const looseStringArray = z.preprocess(
+  splitListInput,
+  z.array(z.string().trim().min(1)).default([]),
+);
 
 const optionalFilterNumber = z.preprocess(
   (value) => (value === "" || value === null || value === undefined ? undefined : value),
@@ -10,17 +16,17 @@ const optionalFilterNumber = z.preprocess(
 
 export const peopleSearchFiltersSchema = z.object({
   personTypes: z.array(personTypeSchema).default([]),
-  industries: z.array(z.string().trim().min(1)).default([]),
-  subIndustries: z.array(z.string().trim().min(1)).default([]),
-  stages: z.array(z.string().trim().min(1)).default([]),
+  industries: looseStringArray,
+  subIndustries: looseStringArray,
+  stages: looseStringArray,
   minCheckSize: optionalFilterNumber,
   maxCheckSize: optionalFilterNumber,
-  locations: z.array(z.string().trim().min(1)).default([]),
-  geographyPreferences: z.array(z.string().trim().min(1)).default([]),
-  organizations: z.array(z.string().trim().min(1)).default([]),
-  titles: z.array(z.string().trim().min(1)).default([]),
-  portfolioKeywords: z.array(z.string().trim().min(1)).default([]),
-  technologyKeywords: z.array(z.string().trim().min(1)).default([]),
+  locations: looseStringArray,
+  geographyPreferences: looseStringArray,
+  organizations: looseStringArray,
+  titles: looseStringArray,
+  portfolioKeywords: looseStringArray,
+  technologyKeywords: looseStringArray,
   relationshipStatus: z.enum(["any", "known", "unknown", "warm"]).default("any"),
   googleContactPresence: z.enum(["any", "present", "absent"]).default("any"),
   directGmailHistory: z.enum(["any", "present", "absent"]).default("any"),
@@ -29,6 +35,7 @@ export const peopleSearchFiltersSchema = z.object({
   savedOnly: z.boolean().default(false),
   externallyDiscovered: z.boolean().optional(),
   manuallyAdded: z.boolean().optional(),
+  matchMode: z.enum(["compatible", "strict"]).default("compatible"),
 });
 
 export const peopleSearchRequestSchema = z.object({
@@ -41,6 +48,50 @@ export const peopleSearchRequestSchema = z.object({
 
 export type PeopleSearchFilters = z.infer<typeof peopleSearchFiltersSchema>;
 export type PeopleSearchRequest = z.infer<typeof peopleSearchRequestSchema>;
+
+export type PeopleSearchRejection = {
+  candidate: string;
+  rejectedAt: string;
+  reasons: string[];
+};
+
+export type PeopleProviderDiagnostics = {
+  stage?: string;
+  model?: string;
+  toolType?: string;
+  webSearchExecuted: boolean;
+  webSearchCallCount: number;
+  citationsCount?: number;
+  researchQueries: string[];
+  rawCandidateCount: number;
+  parsedCandidateCount: number;
+  candidatesWithValidNames: number;
+  candidatesWithValidSourceUrls: number;
+  rejectedCandidates: PeopleSearchRejection[];
+  requestDurationMs?: number;
+};
+
+export type PeopleSearchDiagnostics = {
+  interpretedCriteria: InterpretedPeopleCriteria;
+  normalizedFilters: PeopleSearchFilters;
+  providerStatus: PeopleProviderStatus;
+  providerDiagnostics?: PeopleProviderDiagnostics;
+  counts: {
+    rawProviderCandidates: number;
+    parsedProviderCandidates: number;
+    candidatesWithValidNames: number;
+    candidatesWithValidSourceUrls: number;
+    normalizedCandidates: number;
+    dedupedCandidates: number;
+    afterHardFilters: number;
+    scoredCandidates: number;
+    returnedCandidates: number;
+  };
+  rejectionCounts: Record<string, number>;
+  rejections: PeopleSearchRejection[];
+  rankingThreshold: number;
+  durationMs: number;
+};
 
 export type InterpretedPeopleCriteria = {
   semanticText: string;
@@ -183,4 +234,5 @@ export type PeopleProviderSearchResult = {
   latencyMs: number;
   partial: boolean;
   error?: string;
+  diagnostics?: PeopleProviderDiagnostics;
 };

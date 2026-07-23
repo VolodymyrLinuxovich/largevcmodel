@@ -62,6 +62,26 @@ type SearchResponse = {
   total: number;
   searchRunId: string;
   emptyReasons: string[];
+  diagnostics?: {
+    normalizedFilters: Record<string, unknown>;
+    providerStatus: ProviderStatus;
+    providerDiagnostics?: {
+      model?: string;
+      toolType?: string;
+      webSearchExecuted: boolean;
+      webSearchCallCount: number;
+      researchQueries: string[];
+      rawCandidateCount: number;
+      parsedCandidateCount: number;
+      candidatesWithValidNames: number;
+      candidatesWithValidSourceUrls: number;
+    };
+    counts: Record<string, number>;
+    rejectionCounts: Record<string, number>;
+    rejections: Array<{ candidate: string; rejectedAt: string; reasons: string[] }>;
+    rankingThreshold: number;
+    durationMs: number;
+  };
 };
 
 const PERSON_TYPES = [
@@ -232,6 +252,7 @@ export function PeopleSearchWorkspace({
       {response ? (
         <section className="space-y-8">
           <InterpretedPanel response={response} />
+          {process.env.NODE_ENV === "development" && response.diagnostics ? <DiagnosticsPanel diagnostics={response.diagnostics} /> : null}
           <div className="border-y border-border">
             <div className="grid gap-3 border-b border-border py-4 md:grid-cols-[1fr_auto] md:items-end">
               <div>
@@ -257,6 +278,66 @@ export function PeopleSearchWorkspace({
           </div>
         </section>
       ) : null}
+    </div>
+  );
+}
+
+function DiagnosticsPanel({ diagnostics }: { diagnostics: NonNullable<SearchResponse["diagnostics"]> }) {
+  return (
+    <details className="border-y border-border">
+      <summary className="cursor-pointer py-4">
+        <p className="eyebrow">Search diagnostics</p>
+      </summary>
+      <div className="grid gap-5 pb-5 text-sm lg:grid-cols-2">
+        <div>
+          <p className="eyebrow mb-3">Provider</p>
+          <dl className="grid gap-2 text-muted-foreground">
+            <DiagnosticRow label="Status" value={diagnostics.providerStatus.status} />
+            <DiagnosticRow label="Model" value={diagnostics.providerDiagnostics?.model ?? "Unavailable"} />
+            <DiagnosticRow label="Tool" value={diagnostics.providerDiagnostics?.toolType ?? "Unavailable"} />
+            <DiagnosticRow label="Web search" value={diagnostics.providerDiagnostics?.webSearchExecuted ? "executed" : "not executed"} />
+            <DiagnosticRow label="Tool calls" value={String(diagnostics.providerDiagnostics?.webSearchCallCount ?? 0)} />
+            <DiagnosticRow label="Duration" value={`${diagnostics.durationMs}ms`} />
+          </dl>
+        </div>
+        <div>
+          <p className="eyebrow mb-3">Counts</p>
+          <dl className="grid gap-2 text-muted-foreground">
+            {Object.entries(diagnostics.counts).map(([key, value]) => <DiagnosticRow key={key} label={key} value={String(value)} />)}
+          </dl>
+        </div>
+        <div className="lg:col-span-2">
+          <p className="eyebrow mb-3">Research queries</p>
+          <div className="grid gap-2 text-xs text-muted-foreground">
+            {(diagnostics.providerDiagnostics?.researchQueries ?? []).map((query) => <p key={query}>{query}</p>)}
+          </div>
+        </div>
+        <div className="lg:col-span-2">
+          <p className="eyebrow mb-3">Rejections</p>
+          {diagnostics.rejections.length ? (
+            <div className="divide-y divide-border border-y border-border">
+              {diagnostics.rejections.slice(0, 20).map((rejection, index) => (
+                <div key={`${rejection.candidate}-${index}`} className="grid gap-2 py-3 md:grid-cols-[1fr_140px_1fr]">
+                  <p>{rejection.candidate}</p>
+                  <p className="font-mono text-xs text-muted-foreground">{rejection.rejectedAt}</p>
+                  <p className="text-muted-foreground">{rejection.reasons.join(", ")}</p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-muted-foreground">No rejected candidates recorded.</p>
+          )}
+        </div>
+      </div>
+    </details>
+  );
+}
+
+function DiagnosticRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="grid grid-cols-[180px_1fr] gap-3">
+      <dt className="font-mono text-[0.68rem] uppercase tracking-[0.12em] text-muted-foreground">{label}</dt>
+      <dd>{value}</dd>
     </div>
   );
 }

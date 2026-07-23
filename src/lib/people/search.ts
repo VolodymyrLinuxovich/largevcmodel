@@ -3,6 +3,7 @@ import "server-only";
 import {
   PeopleSearchStatus,
   PersonDiscoveryType,
+  PersonType,
   Prisma,
   ProviderHealthStatus,
   type DiscoveredPerson,
@@ -18,7 +19,14 @@ import { enrichPersonRelationship } from "./relationship";
 import { calculatePeopleFitScore, type PeopleFitScore } from "./scoring";
 import { embedTextLocally, fullTextScore, semanticSimilarity } from "./semantic";
 import { persistProviderOrganization, persistProviderPerson, personSearchText } from "./normalization";
-import { peopleSearchRequestSchema, type InterpretedPeopleCriteria, type PeopleSearchRequest } from "./types";
+import { expandGeographyTerms, expandIndustryTerms, expandStageTerms, isInvestmentPersonType, matchesAnyExpanded } from "./search-taxonomy";
+import {
+  peopleSearchRequestSchema,
+  type InterpretedPeopleCriteria,
+  type PeopleSearchDiagnostics,
+  type PeopleSearchRejection,
+  type PeopleSearchRequest,
+} from "./types";
 
 export const EXTERNAL_DISCOVERY_UNAVAILABLE_MESSAGE =
   "External people discovery is not configured. Gmail and Google Contacts can enrich known candidates, but they cannot be used as the primary discovery source.";
@@ -30,6 +38,7 @@ export type PeopleSearchResponse = {
   total: number;
   searchRunId: string;
   emptyReasons: string[];
+  diagnostics?: PeopleSearchDiagnostics;
 };
 
 export type PeopleSearchResultDto = {
@@ -99,6 +108,7 @@ type PersonWithRelations = DiscoveredPerson & {
 };
 
 export async function searchPeople(prisma: PrismaClient, userId: string, rawInput: PeopleSearchRequest): Promise<PeopleSearchResponse> {
+  const searchStarted = Date.now();
   const input = peopleSearchRequestSchema.parse(rawInput);
   const requestedStartup = input.startupId ? await loadStartupProfile(prisma, userId, input.startupId) : null;
   if (input.startupId && !requestedStartup) throw new Error("Startup profile not found.");
@@ -138,14 +148,33 @@ export async function searchPeople(prisma: PrismaClient, userId: string, rawInpu
 
   const provider = getConfiguredPeopleDiscoveryProvider();
   if (!provider || initialProviderStatus.status === ProviderHealthStatus.UNAVAILABLE) {
+    const diagnostics = buildSearchDiagnostics({
+      input,
+      interpretedCriteria,
+      providerStatus: {
+        name: initialProviderStatus.name,
+        status: ProviderHealthStatus.UNAVAILABLE,
+        message: EXTERNAL_DISCOVERY_UNAVAILABLE_MESSAGE,
+      },
+      providerDiagnostics: undefined,
+      normalizedCount: 0,
+      dedupedCount: 0,
+      afterHardFilters: 0,
+      scoredCandidates: 0,
+      returnedCandidates: 0,
+      rejections: [],
+      durationMs: Date.now() - searchStarted,
+    });
     await prisma.peopleSearchRun.update({
       where: { id: run.id },
       data: {
         status: PeopleSearchStatus.UNAVAILABLE,
         completedAt: new Date(),
         error: EXTERNAL_DISCOVERY_UNAVAILABLE_MESSAGE,
+        diagnostics: diagnostics as unknown as Prisma.InputJsonObject,
       },
     });
+    logPeopleSearchDiagnostics(run.id, diagnostics);
     return {
       interpretedCriteria,
       results: [],
@@ -160,6 +189,7 @@ export async function searchPeople(prisma: PrismaClient, userId: string, rawInpu
         EXTERNAL_DISCOVERY_UNAVAILABLE_MESSAGE,
         "No Gmail or Google Contacts records were used as replacement candidates.",
       ],
+      diagnostics,
     };
   }
 
@@ -190,10 +220,24 @@ export async function searchPeople(prisma: PrismaClient, userId: string, rawInpu
     providerResult.status.status !== ProviderHealthStatus.DEGRADED &&
     providerResult.people.length === 0
   ) {
+    const diagnostics = buildSearchDiagnostics({
+      input,
+      interpretedCriteria,
+      providerStatus: providerResult.status,
+      providerDiagnostics: providerResult.diagnostics,
+      normalizedCount: 0,
+      dedupedCount: 0,
+      afterHardFilters: 0,
+      scoredCandidates: 0,
+      returnedCandidates: 0,
+      rejections: providerResult.diagnostics?.rejectedCandidates ?? [],
+      durationMs: Date.now() - searchStarted,
+    });
     await prisma.peopleSearchRun.update({
       where: { id: run.id },
-      data: { status: PeopleSearchStatus.ERROR, completedAt: new Date(), error: providerResult.status.message },
+      data: { status: PeopleSearchStatus.ERROR, completedAt: new Date(), error: providerResult.status.message, diagnostics: diagnostics as unknown as Prisma.InputJsonObject },
     });
+    logPeopleSearchDiagnostics(run.id, diagnostics);
     return {
       interpretedCriteria,
       results: [],
@@ -204,6 +248,7 @@ export async function searchPeople(prisma: PrismaClient, userId: string, rawInpu
         providerResult.status.message,
         "The provider did not return supported external people. Gmail and Google Contacts were not used as fallback discovery sources.",
       ],
+      diagnostics,
     };
   }
 
@@ -237,13 +282,17 @@ export async function searchPeople(prisma: PrismaClient, userId: string, rawInpu
     : [];
 
   const scored: Array<{ person: PersonWithRelations; relationship: PersonRelationshipEnrichment; fit: PeopleFitScore; relevance: number }> = [];
+  const rejections: PeopleSearchRejection[] = [...(providerResult.diagnostics?.rejectedCandidates ?? [])];
   for (const person of people as PersonWithRelations[]) {
     await upsertEmbedding(prisma, userId, "discovered_person", person.id, person.searchText || personSearchText(person));
     const relationship = await enrichPersonRelationship(prisma, userId, person);
-    if (!passesStructuredFilters(person, relationship, startup, interpretedCriteria, input.filters)) continue;
+    const eligibility = evaluateHardFilters(person, relationship, startup, interpretedCriteria, input.filters);
+    if (!eligibility.eligible) {
+      rejections.push({ candidate: person.fullName, rejectedAt: "hardFilters", reasons: eligibility.reasons });
+      continue;
+    }
     const fit = calculatePeopleFitScore({ startup, person, relationship, interpretedCriteria });
     const relevance = combinedRelevance(input.query, startup, person, fit);
-    if (relevance < 20 && fit.overall < 25) continue;
     scored.push({ person, relationship, fit, relevance });
   }
 
@@ -259,6 +308,20 @@ export async function searchPeople(prisma: PrismaClient, userId: string, rawInpu
     rank += 1;
   }
 
+  const diagnostics = buildSearchDiagnostics({
+    input,
+    interpretedCriteria,
+    providerStatus: providerResult.status,
+    providerDiagnostics: providerResult.diagnostics,
+    normalizedCount: uniqueIds.length,
+    dedupedCount: people.length,
+    afterHardFilters: scored.length,
+    scoredCandidates: scored.length,
+    returnedCandidates: dtos.length,
+    rejections,
+    durationMs: Date.now() - searchStarted,
+  });
+
   await prisma.peopleSearchRun.update({
     where: { id: run.id },
     data: {
@@ -269,8 +332,10 @@ export async function searchPeople(prisma: PrismaClient, userId: string, rawInpu
       filteredCount: scored.length,
       rankedCount: dtos.length,
       completedAt: new Date(),
+      diagnostics: diagnostics as unknown as Prisma.InputJsonObject,
     },
   });
+  logPeopleSearchDiagnostics(run.id, diagnostics);
   await audit(prisma, {
     userId,
     actor: "People discovery",
@@ -295,10 +360,8 @@ export async function searchPeople(prisma: PrismaClient, userId: string, rawInpu
     searchRunId: run.id,
     emptyReasons: dtos.length
       ? []
-      : [
-          "No sufficiently supported external people matched this search.",
-          "The configured provider returned no candidates above the relevance threshold, or filters were too restrictive.",
-        ],
+      : emptyReasons(providerResult.status.message, diagnostics),
+    diagnostics,
   };
 }
 
@@ -329,12 +392,12 @@ async function upsertEmbedding(prisma: PrismaClient, userId: string, entityType:
 export function searchOnlyStartupContext(userId: string, input: PeopleSearchRequest, interpreted: InterpretedPeopleCriteria): StartupProfile {
   const now = new Date();
   const industry = input.filters.industries[0] ?? interpreted.industries[0] ?? null;
-  const targetGeographies = uniqueStrings([...input.filters.locations, ...interpreted.locations, ...interpreted.geographyPreferences]);
-  const technologies = uniqueStrings([...input.filters.technologyKeywords, ...interpreted.technologyKeywords]);
+  const targetGeographies = uniqueStrings(expandGeographyTerms([...input.filters.locations, ...interpreted.locations, ...interpreted.geographyPreferences]));
+  const technologies = uniqueStrings(expandIndustryTerms([...input.filters.technologyKeywords, ...interpreted.technologyKeywords]));
   const keywords = uniqueStrings([
     ...input.filters.portfolioKeywords,
     ...interpreted.portfolioKeywords,
-    ...interpreted.industries,
+    ...expandIndustryTerms(interpreted.industries),
     ...interpreted.titles,
   ]);
 
@@ -347,7 +410,7 @@ export function searchOnlyStartupContext(userId: string, input: PeopleSearchRequ
     oneLineDescription: input.query,
     description: input.query,
     industry,
-    subIndustries: uniqueStrings([...input.filters.subIndustries, ...interpreted.industries]),
+    subIndustries: uniqueStrings(expandIndustryTerms([...input.filters.subIndustries, ...interpreted.industries])),
     product: input.query,
     problem: null,
     solution: null,
@@ -418,40 +481,140 @@ function uniqueStrings(values: string[]) {
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
 }
 
-function passesStructuredFilters(
+export function evaluateHardFilters(
   person: DiscoveredPerson,
   relationship: PersonRelationshipEnrichment,
   startup: StartupProfile,
   interpreted: InterpretedPeopleCriteria,
   filters: PeopleSearchRequest["filters"],
 ) {
+  const reasons: string[] = [];
   const doc = personSearchText(person).toLowerCase();
   const excluded = [...interpreted.excludedTerms, ...startup.excludedInvestors, ...startup.excludedOrganizations].map((value) => value.toLowerCase());
-  if (excluded.some((term) => term && doc.includes(term))) return false;
+  if (excluded.some((term) => term && doc.includes(term))) reasons.push("excluded_term_or_organization");
 
   const requiredTypes = filters.personTypes.length ? filters.personTypes : interpreted.personTypes;
-  if (requiredTypes.length && !person.personTypes.some((type) => requiredTypes.includes(type))) return false;
-  if (filters.minSourceConfidence && (person.sourceConfidence ?? 0) < filters.minSourceConfidence) return false;
-  if (filters.googleContactPresence === "present" && !relationship.googleContactPresent) return false;
-  if (filters.googleContactPresence === "absent" && relationship.googleContactPresent) return false;
-  if (filters.directGmailHistory === "present" && !relationship.directEmailHistory) return false;
-  if (filters.directGmailHistory === "absent" && relationship.directEmailHistory) return false;
-  if (filters.relationshipStatus === "known" && relationship.relationshipStrength <= 0) return false;
-  if (filters.relationshipStatus === "unknown" && relationship.relationshipStrength > 0) return false;
-  if (filters.relationshipStatus === "warm" && relationship.relationshipStrength < 45) return false;
-  if (filters.warmIntroductionAvailable === true && relationship.relationshipStrength < 45) return false;
+  const requiresInvestor = requiredTypes.includes(PersonType.INVESTOR);
+  if (requiredTypes.length) {
+    const typeMatch = person.personTypes.some((type) => requiredTypes.includes(type)) || (requiresInvestor && isInvestmentPersonType(person.personTypes, person.currentTitle));
+    if (!typeMatch) reasons.push("incompatible_person_type");
+  }
+  if (filters.minSourceConfidence && (person.sourceConfidence ?? 0) < filters.minSourceConfidence) reasons.push("source_confidence_below_filter");
+  if (filters.googleContactPresence === "present" && !relationship.googleContactPresent) reasons.push("google_contact_absent");
+  if (filters.googleContactPresence === "absent" && relationship.googleContactPresent) reasons.push("google_contact_present");
+  if (filters.directGmailHistory === "present" && !relationship.directEmailHistory) reasons.push("direct_gmail_history_absent");
+  if (filters.directGmailHistory === "absent" && relationship.directEmailHistory) reasons.push("direct_gmail_history_present");
+  if (filters.relationshipStatus === "known" && relationship.relationshipStrength <= 0) reasons.push("known_relationship_required");
+  if (filters.relationshipStatus === "unknown" && relationship.relationshipStrength > 0) reasons.push("unknown_relationship_required");
+  if (filters.relationshipStatus === "warm" && relationship.relationshipStrength < 45) reasons.push("warm_relationship_required");
+  if (filters.warmIntroductionAvailable === true && relationship.relationshipStrength < 45) reasons.push("warm_introduction_required");
 
-  const containsAny = (needles: string[], haystack: string[]) => !needles.length || needles.some((needle) => haystack.join(" ").toLowerCase().includes(needle.toLowerCase()));
-  if (!containsAny(filters.industries, [...person.industries, ...person.subIndustries])) return false;
-  if (!containsAny(filters.stages, person.preferredStages)) return false;
-  if (!containsAny(filters.locations, [person.location ?? "", ...person.geographyPreferences])) return false;
-  if (!containsAny(filters.organizations, [person.currentOrganizationName ?? "", ...person.previousOrganizations])) return false;
-  if (!containsAny(filters.titles, [person.currentTitle ?? ""])) return false;
-  if (!containsAny(filters.technologyKeywords, [...person.technologies, ...person.keywords, person.biography ?? ""])) return false;
-  if (!containsAny(filters.portfolioKeywords, [...person.portfolioCompanies, ...person.notableInvestments, person.notableExperience ?? ""])) return false;
-  if (filters.minCheckSize && person.maxCheckSize && person.maxCheckSize < filters.minCheckSize) return false;
-  if (filters.maxCheckSize && person.minCheckSize && person.minCheckSize > filters.maxCheckSize) return false;
-  return true;
+  if (filters.matchMode === "strict") {
+    addStrictReason(reasons, "industry_mismatch", matchesAnyExpanded(filters.industries, [...person.industries, ...person.subIndustries], expandIndustryTerms));
+    addStrictReason(reasons, "stage_mismatch", matchesAnyExpanded(filters.stages, person.preferredStages, expandStageTerms));
+    addStrictReason(reasons, "geography_mismatch", matchesAnyExpanded(filters.locations, [person.location ?? "", ...person.geographyPreferences], expandGeographyTerms));
+    addStrictReason(reasons, "organization_mismatch", matchesAnyExpanded(filters.organizations, [person.currentOrganizationName ?? "", ...person.previousOrganizations]));
+    addStrictReason(reasons, "title_mismatch", matchesAnyExpanded(filters.titles, [person.currentTitle ?? ""]));
+    addStrictReason(reasons, "technology_mismatch", matchesAnyExpanded(filters.technologyKeywords, [...person.technologies, ...person.keywords, person.biography ?? ""], expandIndustryTerms));
+    addStrictReason(reasons, "portfolio_mismatch", matchesAnyExpanded(filters.portfolioKeywords, [...person.portfolioCompanies, ...person.notableInvestments, person.notableExperience ?? ""]));
+    if (filters.minCheckSize && (!person.maxCheckSize || person.maxCheckSize < filters.minCheckSize)) reasons.push("min_check_size_mismatch");
+    if (filters.maxCheckSize && (!person.minCheckSize || person.minCheckSize > filters.maxCheckSize)) reasons.push("max_check_size_mismatch");
+  }
+
+  return { eligible: reasons.length === 0, reasons };
+}
+
+function addStrictReason(reasons: string[], reason: string, match: boolean | null) {
+  if (match !== true) reasons.push(match === null ? `${reason}_unknown` : reason);
+}
+
+function buildSearchDiagnostics(input: {
+  input: PeopleSearchRequest;
+  interpretedCriteria: InterpretedPeopleCriteria;
+  providerStatus: PeopleSearchDiagnostics["providerStatus"];
+  providerDiagnostics: PeopleSearchDiagnostics["providerDiagnostics"] | undefined;
+  normalizedCount: number;
+  dedupedCount: number;
+  afterHardFilters: number;
+  scoredCandidates: number;
+  returnedCandidates: number;
+  rejections: PeopleSearchRejection[];
+  durationMs: number;
+}): PeopleSearchDiagnostics {
+  const providerDiagnostics = input.providerDiagnostics;
+  return {
+    interpretedCriteria: input.interpretedCriteria,
+    normalizedFilters: input.input.filters,
+    providerStatus: input.providerStatus,
+    providerDiagnostics,
+    counts: {
+      rawProviderCandidates: providerDiagnostics?.rawCandidateCount ?? 0,
+      parsedProviderCandidates: providerDiagnostics?.parsedCandidateCount ?? 0,
+      candidatesWithValidNames: providerDiagnostics?.candidatesWithValidNames ?? 0,
+      candidatesWithValidSourceUrls: providerDiagnostics?.candidatesWithValidSourceUrls ?? 0,
+      normalizedCandidates: input.normalizedCount,
+      dedupedCandidates: input.dedupedCount,
+      afterHardFilters: input.afterHardFilters,
+      scoredCandidates: input.scoredCandidates,
+      returnedCandidates: input.returnedCandidates,
+    },
+    rejectionCounts: countRejections(input.rejections),
+    rejections: input.rejections.slice(0, 80),
+    rankingThreshold: 0,
+    durationMs: input.durationMs,
+  };
+}
+
+function countRejections(rejections: PeopleSearchRejection[]) {
+  const counts: Record<string, number> = {};
+  for (const rejection of rejections) {
+    for (const reason of rejection.reasons) counts[reason] = (counts[reason] ?? 0) + 1;
+  }
+  return counts;
+}
+
+function logPeopleSearchDiagnostics(searchRunId: string, diagnostics: PeopleSearchDiagnostics) {
+  if (process.env.NODE_ENV === "test") return;
+  console.info(
+    "people_search_diagnostics",
+    JSON.stringify({
+      searchRunId,
+      provider: diagnostics.providerStatus.name,
+      providerStatus: diagnostics.providerStatus.status,
+      webSearchExecuted: diagnostics.providerDiagnostics?.webSearchExecuted ?? false,
+      webSearchCallCount: diagnostics.providerDiagnostics?.webSearchCallCount ?? 0,
+      counts: diagnostics.counts,
+      rejectionCounts: diagnostics.rejectionCounts,
+      rejections: diagnostics.rejections.slice(0, 20).map((rejection) => ({
+        candidate: rejection.candidate,
+        rejectedAt: rejection.rejectedAt,
+        reasons: rejection.reasons,
+      })),
+      durationMs: diagnostics.durationMs,
+    }),
+  );
+}
+
+function emptyReasons(providerMessage: string, diagnostics: PeopleSearchDiagnostics) {
+  if (diagnostics.providerStatus.status !== ProviderHealthStatus.CONFIGURED && diagnostics.providerStatus.status !== ProviderHealthStatus.DEGRADED) {
+    return [providerMessage, "No Gmail or Google Contacts records were used as fallback discovery sources."];
+  }
+  if ((diagnostics.providerDiagnostics?.rawCandidateCount ?? 0) > 0 && diagnostics.counts.normalizedCandidates === 0) {
+    return [
+      `External research returned ${diagnostics.providerDiagnostics?.rawCandidateCount ?? 0} raw candidates, but none survived identity/source normalization.`,
+      "Review search diagnostics for field-level rejection reasons.",
+    ];
+  }
+  if (diagnostics.counts.afterHardFilters === 0 && diagnostics.counts.dedupedCandidates > 0) {
+    return [
+      `External research found ${diagnostics.counts.dedupedCandidates} source-backed candidates, but hard filters removed them.`,
+      "Use compatible matching or remove exact filters to include partial matches.",
+    ];
+  }
+  return [
+    "External research ran, but no source-backed candidates were returned for this search.",
+    "Gmail and Google Contacts were not used as replacement discovery sources.",
+  ];
 }
 
 function combinedRelevance(query: string, startup: StartupProfile, person: DiscoveredPerson, fit: PeopleFitScore) {
