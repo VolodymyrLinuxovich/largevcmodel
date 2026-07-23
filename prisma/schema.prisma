@@ -1031,7 +1031,7 @@ model PersonSource {
   organization   DiscoveredOrganization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   claims         PersonClaimSource[]
 
-  @@unique([userId, canonicalUrl])
+  @@index([userId, canonicalUrl])
   @@index([userId, sourceType])
   @@index([personId])
   @@index([organizationId])

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { PersonType, type DiscoveredPerson, type PersonRelationshipEnrichment } from "@prisma/client";
-import { buildPeopleResearchQueries, parsePeopleDiscoveryJsonForTest, summarizeOpenAIResponseForTest } from "@/lib/people/openai";
+import { buildPeopleDiscoveryBatchesForTest, buildPeopleResearchQueries, dedupeProviderPeopleForTest, parsePeopleDiscoveryJsonForTest, summarizeOpenAIResponseForTest } from "@/lib/people/openai";
 import { interpretPeopleSearchObjective } from "@/lib/people/query";
 import { calculatePeopleFitScore } from "@/lib/people/scoring";
 import { evaluateHardFilters, searchOnlyStartupContext } from "@/lib/people/search";
@@ -94,6 +94,40 @@ describe("external people search pipeline", () => {
     expect(parsed.values[0]?.minCheckSize).toBeNull();
   });
 
+  it("accepts top-level sourceUrls from longlist provider output", () => {
+    const parsed = parsePeopleDiscoveryJsonForTest({
+      people: [
+        {
+          fullName: "Alice Morgan",
+          currentTitle: "General Partner",
+          currentOrganizationName: "Frontier Defence Ventures",
+          location: "London",
+          industries: ["defense technology"],
+          sourceUrls: ["https://example.com/team"],
+        },
+      ],
+    }, providerInput());
+
+    expect(parsed.values).toHaveLength(1);
+    expect(parsed.values[0]?.sources[0]?.url).toBe("https://example.com/team");
+  });
+
+  it("does not infer investor type for non-investment roles just because the query asks for investors", () => {
+    const parsed = parsePeopleDiscoveryJsonForTest({
+      people: [
+        {
+          fullName: "Casey Rivera",
+          currentTitle: "Technology Strategy Lead",
+          currentOrganizationName: "Frontier Defence Ventures",
+          sourceUrls: ["https://example.com/team"],
+        },
+      ],
+    }, providerInput());
+
+    expect(parsed.values).toHaveLength(0);
+    expect(parsed.rejections[0]?.reasons).toContain("incompatible_person_type");
+  });
+
   it("removes unsupported factual claims instead of rejecting the whole candidate", () => {
     const parsed = parsePeopleDiscoveryJsonForTest({
       people: [
@@ -148,6 +182,50 @@ describe("external people search pipeline", () => {
     expect(queries.join(" ")).toContain("dual-use");
     expect(queries.join(" ")).toMatch(/defen[cs]e tech/);
   });
+
+  it("plans multiple person-discovery batches instead of stopping at one source path", () => {
+    const batches = buildPeopleDiscoveryBatchesForTest(providerInput({ limit: 24 }), [
+      organization("Helantic", "London"),
+      organization("NATO Innovation Fund", "Netherlands"),
+      organization("Expansion", "Berlin"),
+      organization("MD One", "London"),
+      organization("Vsquared Ventures", "Munich"),
+      organization("Join Capital", "Berlin"),
+    ]);
+
+    expect(batches.length).toBeGreaterThanOrEqual(3);
+    expect(batches.reduce((sum, batch) => sum + batch.targetPeople, 0)).toBeGreaterThanOrEqual(15);
+    expect(batches.map((batch) => batch.label).join(" ")).toContain("dual-use");
+    expect(batches.flatMap((batch) => batch.researchQueries).join(" ")).toMatch(/national security|geospatial|robotics/);
+  });
+
+  it("deduplicates repeated provider candidates without rejecting distinct sourced investors", () => {
+    const input = providerInput();
+    const parsed = parsePeopleDiscoveryJsonForTest({
+      people: [
+        sourceBackedRawInvestor({ fullName: "Alice Morgan", currentOrganizationName: "Frontier Defence Ventures" }),
+        sourceBackedRawInvestor({ fullName: "Alice Morgan", currentOrganizationName: "Frontier Defence Ventures", publicProfileUrls: ["https://example.com/team?ref=batch"] }),
+        sourceBackedRawInvestor({ fullName: "Brian Shah", currentOrganizationName: "Dual Use Capital", publicProfileUrls: ["https://example.org/team"] }),
+      ],
+    }, input);
+    const deduped = dedupeProviderPeopleForTest(parsed);
+
+    expect(deduped.values).toHaveLength(2);
+    expect(deduped.rejections).toEqual(expect.arrayContaining([expect.objectContaining({ reasons: ["duplicate_identity"] })]));
+  });
+
+  it("keeps distinct people who share the same firm team source URL", () => {
+    const parsed = parsePeopleDiscoveryJsonForTest({
+      people: [
+        sourceBackedRawInvestor({ fullName: "Alice Morgan", currentOrganizationName: "Frontier Defence Ventures", publicProfileUrls: ["https://example.com/team"] }),
+        sourceBackedRawInvestor({ fullName: "Brian Shah", currentOrganizationName: "Frontier Defence Ventures", publicProfileUrls: ["https://example.com/team"] }),
+      ],
+    }, providerInput());
+    const deduped = dedupeProviderPeopleForTest(parsed);
+
+    expect(deduped.values.map((person) => person.fullName)).toEqual(["Alice Morgan", "Brian Shah"]);
+    expect(deduped.rejections).toHaveLength(0);
+  });
 });
 
 function screenshotSearchInput(overrides: Record<string, unknown> = {}) {
@@ -166,7 +244,7 @@ function screenshotSearchInput(overrides: Record<string, unknown> = {}) {
   return { ...parsed, interpreted };
 }
 
-function providerInput(): PeopleProviderSearchInput {
+function providerInput(overrides: Partial<PeopleProviderSearchInput> = {}): PeopleProviderSearchInput {
   const input = screenshotSearchInput();
   return {
     query: input.query,
@@ -196,6 +274,31 @@ function providerInput(): PeopleProviderSearchInput {
       searchCriteria: null,
     },
     limit: 12,
+    ...overrides,
+  };
+}
+
+function organization(name: string, location: string) {
+  return {
+    name,
+    type: "venture firm",
+    website: `https://${name.toLowerCase().replace(/[^a-z0-9]+/g, "")}.example.com`,
+    domain: `${name.toLowerCase().replace(/[^a-z0-9]+/g, "")}.example.com`,
+    location,
+    industries: ["defense technology", "AI"],
+    investmentStages: ["seed"],
+    portfolio: [],
+    publicUrls: [`https://${name.toLowerCase().replace(/[^a-z0-9]+/g, "")}.example.com`],
+    sources: [
+      {
+        title: name,
+        url: `https://${name.toLowerCase().replace(/[^a-z0-9]+/g, "")}.example.com`,
+        accessedAt: new Date("2026-01-01").toISOString(),
+        sourceType: "company",
+        supportsClaims: [`${name} invests in defense technology`],
+      },
+    ],
+    claims: [],
   };
 }
 

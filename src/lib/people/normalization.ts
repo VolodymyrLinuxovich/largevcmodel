@@ -345,35 +345,41 @@ async function persistSourcesAndClaims(
   const sourceByCanonical = new Map<string, string>();
   for (const source of dedupeSources(input.sources)) {
     const canonical = canonicalUrl(source.url);
-    const saved = await prisma.personSource.upsert({
-      where: { userId_canonicalUrl: { userId, canonicalUrl: canonical } },
-      create: {
+    const data = {
+      title: clean(source.title) ?? canonical,
+      publisher: clean(source.publisher),
+      publishedAt: source.publishedAt ? dateOrNull(source.publishedAt) : null,
+      accessedAt: dateOrNull(source.accessedAt) ?? new Date(),
+      sourceType: clean(source.sourceType) ?? "other",
+      origin: input.provider,
+      snippet: clean(source.snippet),
+      supportsClaims: cleanArray(source.supportsClaims),
+      confidence: confidence(source.confidence),
+    };
+    const existing = await prisma.personSource.findFirst({
+      where: {
         userId,
         personId: input.personId ?? null,
         organizationId: input.organizationId ?? null,
-        title: clean(source.title) ?? canonical,
-        url: source.url,
         canonicalUrl: canonical,
-        publisher: clean(source.publisher),
-        publishedAt: source.publishedAt ? dateOrNull(source.publishedAt) : null,
-        accessedAt: dateOrNull(source.accessedAt) ?? new Date(),
-        sourceType: clean(source.sourceType) ?? "other",
-        origin: input.provider,
-        snippet: clean(source.snippet),
-        supportsClaims: cleanArray(source.supportsClaims),
-        confidence: confidence(source.confidence),
       },
-      update: {
-        title: clean(source.title) ?? canonical,
-        publisher: clean(source.publisher),
-        publishedAt: source.publishedAt ? dateOrNull(source.publishedAt) : undefined,
-        accessedAt: dateOrNull(source.accessedAt) ?? new Date(),
-        sourceType: clean(source.sourceType) ?? "other",
-        snippet: clean(source.snippet),
-        supportsClaims: cleanArray(source.supportsClaims),
-        confidence: confidence(source.confidence),
-      },
+      select: { id: true },
     });
+    const saved = existing
+      ? await prisma.personSource.update({
+          where: { id: existing.id },
+          data: { ...data, publishedAt: data.publishedAt ?? undefined },
+        })
+      : await prisma.personSource.create({
+          data: {
+            ...data,
+            userId,
+            personId: input.personId ?? null,
+            organizationId: input.organizationId ?? null,
+            url: source.url,
+            canonicalUrl: canonical,
+          },
+        });
     sourceByCanonical.set(canonical, saved.id);
   }
 

@@ -53,12 +53,20 @@ type JsonCallResult = {
   diagnostics: PeopleProviderDiagnostics;
 };
 
-type CandidateParseResult<T> = {
+export type CandidateParseResult<T> = {
   values: T[];
   rejections: PeopleSearchRejection[];
   rawCount: number;
   validNames: number;
   validSourceUrls: number;
+};
+
+export type PeopleDiscoveryBatch = {
+  label: string;
+  researchQueries: string[];
+  organizations: PeopleProviderOrganization[];
+  targetPeople: number;
+  excludedNames?: string[];
 };
 
 export class OpenAIPeopleDiscoveryProvider implements PeopleDiscoveryProvider {
@@ -106,32 +114,85 @@ export class OpenAIPeopleDiscoveryProvider implements PeopleDiscoveryProvider {
     }
 
     const parsedOrganizations = parseOrganizations(organizationCall.json);
-    const peopleCall = await this.callOpenAIJson({
+    const targetPeople = Math.min(15, Math.max(12, Math.ceil(input.limit * 0.75)));
+    const minimumUniquePeople = Math.min(12, targetPeople);
+    const longlistCall = await this.callOpenAIJson({
       stage: "person_discovery",
       researchQueries,
       schema: peopleDiscoverySchema(),
-      prompt: peopleDiscoveryPrompt(input, researchQueries, parsedOrganizations.values),
-      maxOutputTokens: 6000,
+      prompt: peopleLonglistPrompt(input, researchQueries, targetPeople),
+      maxOutputTokens: 9000,
     });
+    const peopleCalls: JsonCallResult[] = [longlistCall];
+    let parsedPeopleBeforeDedupe = combineParseResults(
+      [longlistCall.ok ? parsePeople(longlistCall.json, parsedOrganizations.values, input) : parseCallFailure(longlistCall, "longlist discovery")],
+    );
+    let parsedPeople = dedupeProviderPeople(parsedPeopleBeforeDedupe);
 
-    if (!peopleCall.ok && !peopleCall.diagnostics.webSearchExecuted) {
+    if (parsedPeople.values.length < minimumUniquePeople) {
+      const peopleBatches = buildPeopleDiscoveryBatches(input, researchQueries, parsedOrganizations.values, targetPeople).map((batch) => ({
+        ...batch,
+        excludedNames: parsedPeople.values.map((person) => person.fullName),
+      }));
+      const batchCalls = await Promise.all(
+        peopleBatches.map((batch) =>
+          this.callOpenAIJson({
+            stage: "person_discovery",
+            researchQueries: batch.researchQueries,
+            schema: peopleDiscoverySchema(),
+            prompt: peopleDiscoveryPrompt(input, batch),
+            maxOutputTokens: 7000,
+          }),
+        ),
+      );
+      peopleCalls.push(...batchCalls);
+      parsedPeopleBeforeDedupe = combineParseResults([
+        parsedPeopleBeforeDedupe,
+        ...batchCalls.map((call, index) =>
+          call.ok
+            ? parsePeople(call.json, parsedOrganizations.values, input)
+            : parseCallFailure(call, peopleBatches[index]?.label ?? `person_batch_${index + 1}`),
+        ),
+      ]);
+      parsedPeople = dedupeProviderPeople(parsedPeopleBeforeDedupe);
+    }
+
+    for (let pass = 1; parsedPeople.values.length < minimumUniquePeople && pass <= 2; pass += 1) {
+      const expansionBatch = buildBreadthExpansionBatch(input, researchQueries, parsedOrganizations.values, parsedPeople.values, minimumUniquePeople - parsedPeople.values.length, pass);
+      const expansionCall = await this.callOpenAIJson({
+        stage: "person_discovery",
+        researchQueries: expansionBatch.researchQueries,
+        schema: peopleDiscoverySchema(),
+        prompt: peopleDiscoveryPrompt(input, expansionBatch),
+        maxOutputTokens: 9000,
+      });
+      peopleCalls.push(expansionCall);
+      const parsedExpansion = expansionCall.ok
+        ? parsePeople(expansionCall.json, parsedOrganizations.values, input)
+        : parseCallFailure(expansionCall, expansionBatch.label);
+      parsedPeopleBeforeDedupe = combineParseResults([parsedPeopleBeforeDedupe, parsedExpansion]);
+      parsedPeople = dedupeProviderPeople(parsedPeopleBeforeDedupe);
+    }
+
+    const anyPeopleWebSearch = peopleCalls.some((call) => call.diagnostics.webSearchExecuted);
+    if (!anyPeopleWebSearch) {
       return this.errorResult(
         started,
-        peopleCall.status ?? ProviderHealthStatus.DEGRADED,
-        peopleCall.error ?? "OpenAI did not execute web search for person discovery.",
-        mergeProviderDiagnostics(organizationCall.diagnostics, peopleCall.diagnostics, parsedOrganizations, emptyParseResult<PeopleProviderPerson>()),
+        firstProviderErrorStatus(peopleCalls) ?? ProviderHealthStatus.DEGRADED,
+        firstProviderError(peopleCalls) ?? "OpenAI did not execute web search for person discovery.",
+        mergeProviderDiagnostics(organizationCall.diagnostics, combineCallDiagnostics(peopleCalls), parsedOrganizations, emptyParseResult<PeopleProviderPerson>()),
       );
     }
 
-    const parsedPeople = parsePeople(peopleCall.json, parsedOrganizations.values, input);
-    const diagnostics = mergeProviderDiagnostics(organizationCall.diagnostics, peopleCall.diagnostics, parsedOrganizations, parsedPeople);
+    const peopleDiagnostics = combineCallDiagnostics(peopleCalls);
+    const diagnostics = mergeProviderDiagnostics(organizationCall.diagnostics, peopleDiagnostics, parsedOrganizations, parsedPeopleBeforeDedupe);
     diagnostics.requestDurationMs = Date.now() - started;
 
-    const allRejections = [...parsedOrganizations.rejections, ...parsedPeople.rejections];
+    const allRejections = [...parsedOrganizations.rejections, ...parsedPeopleBeforeDedupe.rejections, ...parsedPeople.rejections];
     const status = providerStatusForParsedResult({
       diagnostics,
       peopleCount: parsedPeople.values.length,
-      hadProviderError: Boolean(organizationCall.error || peopleCall.error),
+      hadProviderError: Boolean(organizationCall.error || peopleCalls.some((call) => call.error)),
     });
 
     return {
@@ -140,8 +201,8 @@ export class OpenAIPeopleDiscoveryProvider implements PeopleDiscoveryProvider {
       people: parsedPeople.values,
       organizations: parsedOrganizations.values,
       latencyMs: Date.now() - started,
-      partial: Boolean(organizationCall.error || peopleCall.error || allRejections.length),
-      error: parsedPeople.values.length ? organizationCall.error ?? peopleCall.error : peopleCall.error ?? organizationCall.error,
+      partial: Boolean(organizationCall.error || peopleCalls.some((call) => call.error) || allRejections.length),
+      error: parsedPeople.values.length ? organizationCall.error ?? firstProviderError(peopleCalls) : firstProviderError(peopleCalls) ?? organizationCall.error,
       diagnostics: { ...diagnostics, rejectedCandidates: allRejections },
     };
   }
@@ -179,14 +240,7 @@ export class OpenAIPeopleDiscoveryProvider implements PeopleDiscoveryProvider {
                 content: [
                   {
                     type: "input_text",
-                    text: [
-                      "You are a source-grounded external people discovery adapter for LargeVCModel.",
-                      "You must use the web search tool before answering.",
-                      "Return JSON only. Do not invent people, titles, organizations, check sizes, theses, portfolios, or URLs.",
-                      "Use public sources only. Gmail and Google Contacts are private enrichment layers and are unavailable.",
-                      "Fields may be null or empty when not source-supported. Unknown data is acceptable.",
-                      "Every returned person or organization must include public source URLs that support identity, role, organization, or fit evidence.",
-                    ].join(" "),
+                    text: systemPromptForStage(input.stage),
                   },
                 ],
               },
@@ -325,8 +379,18 @@ export function buildPeopleResearchQueries(input: PeopleProviderSearchInput) {
   ]).slice(0, 10);
 }
 
+export function buildPeopleDiscoveryBatchesForTest(input: PeopleProviderSearchInput, organizations: PeopleProviderOrganization[] = []) {
+  const researchQueries = buildPeopleResearchQueries(input);
+  const targetPeople = Math.min(15, Math.max(12, Math.ceil(input.limit * 0.75)));
+  return buildPeopleDiscoveryBatches(input, researchQueries, organizations, targetPeople);
+}
+
 export function parsePeopleDiscoveryJsonForTest(json: unknown, input: PeopleProviderSearchInput) {
   return parsePeople(json, [], input);
+}
+
+export function dedupeProviderPeopleForTest(result: CandidateParseResult<PeopleProviderPerson>) {
+  return dedupeProviderPeople(result);
 }
 
 export function summarizeOpenAIResponseForTest(response: OpenAIResponse) {
@@ -335,14 +399,18 @@ export function summarizeOpenAIResponseForTest(response: OpenAIResponse) {
 }
 
 function organizationDiscoveryPrompt(input: PeopleProviderSearchInput, researchQueries: string[]) {
+  const targetOrganizations = Math.min(24, Math.max(12, Math.ceil(input.limit * 0.5)));
   return JSON.stringify({
     task: "Stage B: discover relevant venture firms, funds, accelerators, and investment organizations first.",
     startup: input.startup,
     interpretedCriteria: input.interpreted,
     researchQueries,
+    targetOrganizationCount: targetOrganizations,
     instructions: [
       "Search public web sources for organizations matching the criteria.",
       "Prefer organizations with evidence of defense/defence tech, dual-use, national security, AI, autonomy, robotics, geospatial intelligence, or related portfolios.",
+      `Return ${targetOrganizations} distinct organizations when public sources support them. Do not stop after the first good match.`,
+      "Use different terminology variants from the research queries so narrow public wording does not collapse the result set.",
       "Return only organizations with source URLs. Unknown check size or stage is allowed as null or empty.",
     ],
     output: {
@@ -370,13 +438,199 @@ function organizationDiscoveryPrompt(input: PeopleProviderSearchInput, researchQ
   });
 }
 
-function peopleDiscoveryPrompt(input: PeopleProviderSearchInput, researchQueries: string[], organizations: PeopleProviderOrganization[]) {
+function systemPromptForStage(stage: "organization_discovery" | "person_discovery") {
+  if (stage === "person_discovery") {
+    return [
+      "You are a public-source people longlist discovery system for LargeVCModel.",
+      "You must use the web search tool before answering.",
+      "Return JSON only.",
+      "Build a broad longlist, not a best single answer.",
+      "Every returned person must be a real human with a public source URL supporting identity, role, or organization.",
+      "Do not invent people, titles, organizations, portfolios, check sizes, theses, or URLs.",
+      "Unknown fit fields are allowed and should be null or empty.",
+      "Use public sources only. Gmail and Google Contacts are unavailable and only run later as private relationship enrichment.",
+      "Do not repeat people.",
+    ].join(" ");
+  }
+
+  return [
+    "You are a source-grounded external organization discovery adapter for LargeVCModel.",
+    "You must use the web search tool before answering.",
+    "Return JSON only.",
+    "Do not invent organizations, investment stages, check sizes, portfolios, or URLs.",
+    "Use public sources only. Unknown data is acceptable.",
+    "Every returned organization must include public source URLs that support identity or fit evidence.",
+  ].join(" ");
+}
+
+function peopleLonglistPrompt(input: PeopleProviderSearchInput, researchQueries: string[], targetPeople: number) {
+  const profileless = input.startup.id === "search-context";
+  const longlistCriteria = profileless
+    ? {
+        personTypes: input.interpreted.personTypes,
+        industries: input.interpreted.industries,
+        stages: input.interpreted.stages,
+        locations: input.interpreted.locations,
+        geographyPreferences: input.interpreted.geographyPreferences,
+        organizations: input.interpreted.organizations,
+        titles: input.interpreted.titles,
+        portfolioKeywords: input.interpreted.portfolioKeywords,
+        technologyKeywords: input.interpreted.technologyKeywords,
+        relationshipRequirements: input.interpreted.relationshipRequirements,
+        warmIntroductionPreference: input.interpreted.warmIntroductionPreference,
+      }
+    : input.interpreted;
   return JSON.stringify({
-    task: "Stage C and D: identify actual investment professionals at supported organizations, then verify profile facts with public sources.",
+    task: "Build a longlist, not a best single answer.",
+    startupContext: profileless ? null : input.startup,
+    interpretedCriteria: longlistCriteria,
+    researchQueries: profileless ? researchQueries.filter((query) => query !== input.query) : researchQueries,
+    targetPeopleCount: targetPeople,
+    instructions: [
+      `Find ${targetPeople} distinct European investment professionals who invest in defense technology, dual-use, miltech, national security software, AI, autonomy, robotics, aerospace/defense, geospatial intelligence, or military software at seed, pre-seed, early-stage, or pre-Series A when those criteria are requested.`,
+      "When the user asks a broader non-investor query, adapt the same longlist behavior to the requested person type, sector, geography, and role.",
+      "For investor searches, include partners, general partners, managing partners, principals, investment directors, investment managers, venture partners, angel investors, and fund managers.",
+      "Use public web search broadly across firm team pages, fund profile pages, portfolio pages, interviews, public databases, and credible news sources.",
+      "Use terminology variants: defense tech, defence tech, miltech, national security, dual-use, aerospace and defense, autonomy, robotics, geospatial intelligence, AI, and military software.",
+      "Every person must have a real full name, current investment-related role, current organization, and at least one public source URL supporting identity or role.",
+      "Do not stop at one result. Do not repeat a person. Unknown check size, personal thesis, education, or biography is allowed.",
+      "Return thinner source-backed profiles rather than omitting useful partial matches.",
+    ],
+    output: {
+      people: [
+        {
+          fullName: "string",
+          title: "string",
+          organization: "string",
+          location: "string|null",
+          sourceUrls: ["url"],
+          optionalSourceSupportedFields: {
+            industries: ["string"],
+            preferredStages: ["string"],
+            geographyPreferences: ["string"],
+            portfolioCompanies: ["string"],
+            investmentThesis: "string|null",
+          },
+        },
+      ],
+    },
+  });
+}
+
+function buildPeopleDiscoveryBatches(
+  input: PeopleProviderSearchInput,
+  researchQueries: string[],
+  organizations: PeopleProviderOrganization[],
+  targetPeople: number,
+): PeopleDiscoveryBatch[] {
+  const batchCount = targetPeople > 18 ? 4 : 3;
+  const targetPerBatch = Math.max(4, Math.ceil(targetPeople / batchCount));
+  const organizationGroups = chunkArray(organizations, Math.max(4, Math.ceil(Math.max(organizations.length, 1) / batchCount)));
+  const interpreted = input.interpreted;
+  const geography = expandGeographyTerms([...interpreted.locations, ...interpreted.geographyPreferences, ...input.startup.targetGeographies]).slice(0, 6).join(" ") || "global";
+  const industry = expandIndustryTerms([...interpreted.industries, ...input.startup.subIndustries, input.startup.industry ?? ""]).slice(0, 8).join(" ") || "technology";
+  const stage = expandStageTerms([...interpreted.stages, input.startup.fundingStage ?? ""]).slice(0, 5).join(" ") || "early stage";
+
+  const groups = [
+    {
+      label: "core investment-role discovery",
+      queries: [
+        input.query,
+        `${geography} ${stage} ${industry} investors partners venture capital`,
+        researchQueries[1],
+        researchQueries[2],
+      ],
+    },
+    {
+      label: "dual-use and national-security discovery",
+      queries: [
+        `European dual-use venture capital partners seed defense AI`,
+        `national security software VC partners Europe`,
+        `defence technology fund partners Europe early stage`,
+        researchQueries[3],
+        researchQueries[4],
+      ],
+    },
+    {
+      label: "autonomy robotics and geospatial discovery",
+      queries: [
+        `autonomous systems robotics defense investors Europe partners`,
+        `military AI geospatial intelligence venture investors Europe`,
+        `unmanned systems defense tech VC Europe seed partners`,
+        researchQueries[5],
+        researchQueries[6],
+      ],
+    },
+    {
+      label: "adjacent aerospace and security software discovery",
+      queries: [
+        `aerospace defense AI venture capital Europe early stage partners`,
+        `security software national resilience dual use VC Europe seed`,
+        `frontier technology defense venture investors Europe partners`,
+        researchQueries[7],
+        researchQueries[8],
+      ],
+    },
+  ];
+
+  return groups.slice(0, batchCount).map((group, index) => ({
+    label: group.label,
+    researchQueries: uniqueStrings(group.queries),
+    organizations: organizationGroups[index]?.length ? organizationGroups[index] : organizations,
+    targetPeople: targetPerBatch,
+  }));
+}
+
+function buildBreadthExpansionBatch(
+  input: PeopleProviderSearchInput,
+  researchQueries: string[],
+  organizations: PeopleProviderOrganization[],
+  existingPeople: PeopleProviderPerson[],
+  missingCount: number,
+  pass: number,
+): PeopleDiscoveryBatch {
+  const interpreted = input.interpreted;
+  const geography = expandGeographyTerms([...interpreted.locations, ...interpreted.geographyPreferences, ...input.startup.targetGeographies]).slice(0, 8).join(" ") || "global";
+  const industry = expandIndustryTerms([...interpreted.industries, ...input.startup.subIndustries, input.startup.industry ?? ""]).slice(0, 10).join(" ") || "technology";
+  const stage = expandStageTerms([...interpreted.stages, input.startup.fundingStage ?? ""]).slice(0, 6).join(" ") || "early stage";
+  const excludedNames = uniqueStrings(existingPeople.map((person) => person.fullName));
+  const expansionQueries =
+    pass === 1
+      ? [
+          `list of European defense technology venture capital partners seed AI`,
+          `dual-use national security VC partners early stage Europe`,
+          `defence tech fund team partners AI autonomy Europe`,
+          `seed investors defense AI Europe venture partner principal`,
+        ]
+      : [
+          `European venture funds investing in miltech AI team partner principal`,
+          `defense autonomy robotics VC partners Europe seed pre-seed`,
+          `national security software investors Europe early stage team`,
+          `geospatial intelligence defense technology venture capital Europe partner`,
+        ];
+
+  return {
+    label: `breadth expansion pass ${pass}`,
+    researchQueries: uniqueStrings([
+      ...expansionQueries,
+      `${geography} ${stage} ${industry} investment partner venture capital`,
+      ...researchQueries.slice(pass, pass + 3),
+    ]),
+    organizations,
+    targetPeople: Math.min(12, Math.max(6, missingCount + 4)),
+    excludedNames,
+  };
+}
+
+function peopleDiscoveryPrompt(input: PeopleProviderSearchInput, batch: PeopleDiscoveryBatch) {
+  return JSON.stringify({
+    task: `Stage C and D: ${batch.label}. Identify actual investment professionals at supported organizations, then verify profile facts with public sources.`,
     startup: input.startup,
     interpretedCriteria: input.interpreted,
-    researchQueries,
-    discoveredOrganizations: organizations.slice(0, 16).map((organization) => ({
+    researchQueries: batch.researchQueries,
+    targetPeopleCount: batch.targetPeople,
+    excludedAlreadyReturnedNames: batch.excludedNames ?? [],
+    discoveredOrganizations: batch.organizations.slice(0, 16).map((organization) => ({
       name: organization.name,
       website: organization.website,
       location: organization.location,
@@ -388,6 +642,10 @@ function peopleDiscoveryPrompt(input: PeopleProviderSearchInput, researchQueries
     instructions: [
       "Find actual people: partner, general partner, managing partner, principal, investment director, investor, venture partner, or similar investment roles.",
       "Use organization team pages, portfolio pages, credible databases, interviews, or news sources.",
+      `Return at least ${batch.targetPeople} distinct people for this batch when public sources support them. Do not stop after one strong candidate.`,
+      "Cover multiple organizations and multiple query variants. If the supplied organization list is sparse, discover additional relevant organizations through web search before naming people.",
+      batch.excludedNames?.length ? `Do not return these already discovered names: ${batch.excludedNames.join(", ")}.` : "Avoid duplicate people across organizations and source paths.",
+      "Prefer breadth plus source-backed partial profiles over one complete profile. Missing check size, thesis, education, or biography is acceptable.",
       "Minimum returned person: real full name, investment-related role, current organization, and at least one public source URL supporting identity or role.",
       "Do not require check size, personal thesis, education, or complete biography. Leave unknown fields null or empty.",
       "For organization-level fit evidence, cite organization sources and mark person-specific unknowns as missing by leaving fields empty.",
@@ -487,7 +745,7 @@ function parsePeople(json: unknown, organizations: PeopleProviderOrganization[],
   let validSourceUrls = 0;
 
   raw.forEach((candidate, index) => {
-    const person = normalizeRawPerson(candidate, organizationByName, input);
+    const person = normalizeRawPerson(candidate, organizationByName);
     const displayName = person.fullName || `candidate:${index}`;
     const reasons: string[] = [];
     if (!person.fullName) reasons.push("invalid_full_name");
@@ -509,17 +767,19 @@ function parsePeople(json: unknown, organizations: PeopleProviderOrganization[],
   return { values, rejections, rawCount: raw.length, validNames, validSourceUrls };
 }
 
-function normalizeRawPerson(raw: unknown, organizationByName: Map<string, PeopleProviderOrganization>, input: PeopleProviderSearchInput): Partial<PeopleProviderPerson> {
+function normalizeRawPerson(raw: unknown, organizationByName: Map<string, PeopleProviderOrganization>): Partial<PeopleProviderPerson> {
   const data = objectRecord(raw);
+  const optionalFields = objectRecord(data.optionalSourceSupportedFields);
   const rawOrganization = objectRecord(data.currentOrganization ?? data.organization);
   const organizationName = stringValue(data.currentOrganizationName ?? data.organizationName ?? data.firm ?? data.fund ?? rawOrganization.name ?? (typeof data.organization === "string" ? data.organization : null));
   const currentOrganization = organizationName ? organizationByName.get(normalizeTerm(organizationName)) ?? normalizeRawOrganization(rawOrganization.name ? rawOrganization : { name: organizationName }) : null;
   const currentTitle = stringValue(data.currentTitle ?? data.title ?? data.role);
   const explicitTypes = normalizePersonTypes(data.personTypes ?? data.personType ?? data.type);
-  const personTypes = explicitTypes.length ? explicitTypes : isInvestmentPersonType([], currentTitle) || input.interpreted.personTypes.includes(PersonType.INVESTOR) ? [PersonType.INVESTOR] : [];
+  const personTypes = explicitTypes.length ? explicitTypes : isInvestmentPersonType([], currentTitle) ? [PersonType.INVESTOR] : [];
   const claims = normalizeClaims(data.claims);
-  const publicProfileUrls = validUrls([...(stringArray(data.publicProfileUrls) ?? []), stringValue(data.linkedinUrl), stringValue(data.personalWebsite)].filter(Boolean) as string[]);
-  const sources = normalizeSources(data.sources, claims, publicProfileUrls);
+  const publicProfileUrls = validUrls([...(stringArray(data.publicProfileUrls) ?? []), ...(stringArray(data.sourceUrls) ?? []), stringValue(data.linkedinUrl), stringValue(data.personalWebsite)].filter(Boolean) as string[]);
+  const rawSourceInput = Array.isArray(data.sources) && data.sources.length ? data.sources : data.sourceUrls;
+  const sources = normalizeSources(rawSourceInput, claims, publicProfileUrls);
   const sourceConfidence = numberValue(data.sourceConfidence) ?? sourceConfidenceFromEvidence(sources, claims);
 
   return {
@@ -534,14 +794,14 @@ function normalizeRawPerson(raw: unknown, organizationByName: Map<string, People
     personTypes,
     location: stringValue(data.location),
     biography: stringValue(data.biography ?? data.bio),
-    investmentThesis: stringValue(data.investmentThesis ?? data.thesis),
-    industries: uniqueStrings(expandIndustryTerms(stringArray(data.industries))),
-    subIndustries: uniqueStrings(expandIndustryTerms(stringArray(data.subIndustries))),
-    preferredStages: uniqueStrings(expandStageTerms(stringArray(data.preferredStages ?? data.stages))),
+    investmentThesis: stringValue(data.investmentThesis ?? data.thesis ?? optionalFields.investmentThesis),
+    industries: uniqueStrings(expandIndustryTerms(stringArray(data.industries ?? optionalFields.industries))),
+    subIndustries: uniqueStrings(expandIndustryTerms(stringArray(data.subIndustries ?? optionalFields.subIndustries))),
+    preferredStages: uniqueStrings(expandStageTerms(stringArray(data.preferredStages ?? data.stages ?? optionalFields.preferredStages ?? optionalFields.stages))),
     minCheckSize: moneyValue(data.minCheckSize ?? objectRecord(data.checkSize).min),
     maxCheckSize: moneyValue(data.maxCheckSize ?? objectRecord(data.checkSize).max),
-    geographyPreferences: uniqueStrings(expandGeographyTerms(stringArray(data.geographyPreferences ?? data.geographies))),
-    portfolioCompanies: stringArray(data.portfolioCompanies ?? data.portfolio),
+    geographyPreferences: uniqueStrings(expandGeographyTerms(stringArray(data.geographyPreferences ?? data.geographies ?? optionalFields.geographyPreferences ?? optionalFields.geographies))),
+    portfolioCompanies: stringArray(data.portfolioCompanies ?? data.portfolio ?? optionalFields.portfolioCompanies ?? optionalFields.portfolio),
     notableInvestments: stringArray(data.notableInvestments),
     notableExperience: stringValue(data.notableExperience),
     education: stringArray(data.education),
@@ -693,6 +953,25 @@ function mergeProviderDiagnostics(
   };
 }
 
+function combineCallDiagnostics(calls: JsonCallResult[]): PeopleProviderDiagnostics {
+  const first = calls[0]?.diagnostics ?? baseProviderDiagnostics("person_discovery", DEFAULT_MODEL, "web_search_preview", [], Date.now());
+  return {
+    stage: first.stage,
+    model: first.model,
+    toolType: first.toolType,
+    webSearchExecuted: calls.some((call) => call.diagnostics.webSearchExecuted),
+    webSearchCallCount: calls.reduce((sum, call) => sum + call.diagnostics.webSearchCallCount, 0),
+    citationsCount: calls.reduce((sum, call) => sum + (call.diagnostics.citationsCount ?? 0), 0),
+    researchQueries: uniqueStrings(calls.flatMap((call) => call.diagnostics.researchQueries)),
+    rawCandidateCount: calls.reduce((sum, call) => sum + call.diagnostics.rawCandidateCount, 0),
+    parsedCandidateCount: calls.reduce((sum, call) => sum + call.diagnostics.parsedCandidateCount, 0),
+    candidatesWithValidNames: calls.reduce((sum, call) => sum + call.diagnostics.candidatesWithValidNames, 0),
+    candidatesWithValidSourceUrls: calls.reduce((sum, call) => sum + call.diagnostics.candidatesWithValidSourceUrls, 0),
+    rejectedCandidates: calls.flatMap((call) => call.diagnostics.rejectedCandidates),
+    requestDurationMs: calls.reduce((sum, call) => sum + (call.diagnostics.requestDurationMs ?? 0), 0),
+  };
+}
+
 function baseProviderDiagnostics(stage: string, model: string, toolType: string, researchQueries: string[], started: number): PeopleProviderDiagnostics {
   return {
     stage,
@@ -708,6 +987,80 @@ function baseProviderDiagnostics(stage: string, model: string, toolType: string,
     rejectedCandidates: [],
     requestDurationMs: Date.now() - started,
   };
+}
+
+function combineParseResults<T>(results: Array<CandidateParseResult<T>>): CandidateParseResult<T> {
+  return {
+    values: results.flatMap((result) => result.values),
+    rejections: results.flatMap((result) => result.rejections),
+    rawCount: results.reduce((sum, result) => sum + result.rawCount, 0),
+    validNames: results.reduce((sum, result) => sum + result.validNames, 0),
+    validSourceUrls: results.reduce((sum, result) => sum + result.validSourceUrls, 0),
+  };
+}
+
+function parseCallFailure(call: JsonCallResult, label: string): CandidateParseResult<PeopleProviderPerson> {
+  return {
+    values: [],
+    rejections: [
+      {
+        candidate: label,
+        rejectedAt: "providerBatch",
+        reasons: [call.error ?? "provider_batch_failed"],
+      },
+    ],
+    rawCount: 0,
+    validNames: 0,
+    validSourceUrls: 0,
+  };
+}
+
+function dedupeProviderPeople(result: CandidateParseResult<PeopleProviderPerson>): CandidateParseResult<PeopleProviderPerson> {
+  const values: PeopleProviderPerson[] = [];
+  const rejections: PeopleSearchRejection[] = [];
+  const seen = new Set<string>();
+  for (const person of result.values) {
+    const key = providerPersonKey(person);
+    if (seen.has(key)) {
+      rejections.push({
+        candidate: person.fullName,
+        rejectedAt: "providerDeduplication",
+        reasons: ["duplicate_identity"],
+      });
+      continue;
+    }
+    seen.add(key);
+    values.push(person);
+  }
+  return {
+    values,
+    rejections,
+    rawCount: result.rawCount,
+    validNames: result.validNames,
+    validSourceUrls: result.validSourceUrls,
+  };
+}
+
+function providerPersonKey(person: PeopleProviderPerson) {
+  const name = normalizeTerm(person.fullName);
+  const organization = normalizeTerm(person.currentOrganizationName ?? "");
+  const linkedin = person.linkedinUrl ? canonicalUrl(person.linkedinUrl) : "";
+  return [name, organization, linkedin].filter(Boolean).join("|");
+}
+
+function firstProviderError(calls: JsonCallResult[]) {
+  return calls.find((call) => call.error)?.error;
+}
+
+function firstProviderErrorStatus(calls: JsonCallResult[]) {
+  return calls.find((call) => call.status)?.status;
+}
+
+function chunkArray<T>(values: T[], size: number) {
+  if (!values.length) return [];
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += size) chunks.push(values.slice(index, index + size));
+  return chunks;
 }
 
 function extractOutputText(response: OpenAIResponse) {
