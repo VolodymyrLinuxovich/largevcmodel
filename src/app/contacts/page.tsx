@@ -15,12 +15,13 @@ const pageSize = 25;
 export default async function ContactsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; source?: string; recency?: string; sort?: string; page?: string }>;
+  searchParams: Promise<{ q?: string; source?: string; recency?: string; sort?: string; page?: string; includeAutomated?: string }>;
 }) {
   const data = await getWorkspaceData();
   if (!data.user) return <SignInPanel data={data} />;
-  const { q = "", source = "", recency = "", sort = "relationship", page = "1" } = await searchParams;
+  const { q = "", source = "", recency = "", sort = "relationship", page = "1", includeAutomated = "" } = await searchParams;
   const currentPage = Math.max(1, Number.parseInt(page, 10) || 1);
+  const showAutomated = includeAutomated === "true";
   const connected = integrationConnected(data, IntegrationService.GOOGLE_CONTACTS) || integrationConnected(data, IntegrationService.GMAIL);
   const sourceFilter = Object.values(ContactSource).includes(source as ContactSource) ? (source as ContactSource) : undefined;
   const recencyDate =
@@ -35,6 +36,7 @@ export default async function ContactsPage({
     userId: data.user.id,
     ...(sourceFilter ? { source: sourceFilter } : {}),
     ...(recencyDate ? { lastInteractionAt: { gte: recencyDate } } : {}),
+    ...(showAutomated ? {} : { NOT: automatedContactSignals() }),
     ...(q
       ? {
           OR: [
@@ -80,7 +82,7 @@ export default async function ContactsPage({
       <Section
         title="Contact index"
         aside={
-          <form className="grid w-full gap-2 md:grid-cols-[1fr_150px_150px_150px_auto] lg:w-[920px]">
+          <form className="grid w-full gap-2 md:grid-cols-[1fr_150px_150px_150px_auto] lg:w-[980px]">
             <Input name="q" defaultValue={q} placeholder="Search names, emails, companies, notes" aria-label="Search contacts" />
             <Select name="source" defaultValue={source} aria-label="Filter by source">
               <option value="">All sources</option>
@@ -102,6 +104,16 @@ export default async function ContactsPage({
               <option value="name">Name</option>
             </Select>
             <Button type="submit" variant="outline">Search</Button>
+            <label className="flex items-center gap-2 text-xs leading-5 text-muted-foreground md:col-span-full">
+              <input
+                type="checkbox"
+                name="includeAutomated"
+                value="true"
+                defaultChecked={showAutomated}
+                className="h-3.5 w-3.5 accent-primary"
+              />
+              Include automated and organization senders
+            </label>
           </form>
         }
       >
@@ -149,10 +161,10 @@ export default async function ContactsPage({
               </p>
               <div className="flex gap-2">
                 <Button asChild variant="outline" size="sm" disabled={currentPage <= 1}>
-                  <Link href={contactsPageHref({ q, source, recency, sort, page: currentPage - 1 })}>Previous</Link>
+                  <Link href={contactsPageHref({ q, source, recency, sort, includeAutomated, page: currentPage - 1 })}>Previous</Link>
                 </Button>
                 <Button asChild variant="outline" size="sm" disabled={currentPage >= totalPages}>
-                  <Link href={contactsPageHref({ q, source, recency, sort, page: currentPage + 1 })}>Next</Link>
+                  <Link href={contactsPageHref({ q, source, recency, sort, includeAutomated, page: currentPage + 1 })}>Next</Link>
                 </Button>
               </div>
             </div>
@@ -165,12 +177,42 @@ export default async function ContactsPage({
   );
 }
 
-function contactsPageHref(input: { q: string; source: string; recency: string; sort: string; page: number }) {
+function automatedContactSignals(): Prisma.ContactWhereInput[] {
+  const genericLocalParts = [
+    "alerts",
+    "billing",
+    "contact",
+    "digest",
+    "follow-suggestions",
+    "hello",
+    "info",
+    "marketing",
+    "newsletter",
+    "news",
+    "no-reply",
+    "noreply",
+    "notifications",
+    "receipts",
+    "support",
+    "team",
+    "updates",
+  ];
+
+  return [
+    ...genericLocalParts.map((localPart) => ({
+      primaryEmail: { startsWith: `${localPart}@`, mode: "insensitive" as const },
+    })),
+    { fullName: null, organization: null, title: null, source: ContactSource.GMAIL },
+  ];
+}
+
+function contactsPageHref(input: { q: string; source: string; recency: string; sort: string; includeAutomated: string; page: number }) {
   const params = new URLSearchParams();
   if (input.q) params.set("q", input.q);
   if (input.source) params.set("source", input.source);
   if (input.recency) params.set("recency", input.recency);
   if (input.sort && input.sort !== "relationship") params.set("sort", input.sort);
+  if (input.includeAutomated === "true") params.set("includeAutomated", input.includeAutomated);
   if (input.page > 1) params.set("page", String(input.page));
   const query = params.toString();
   return query ? `/contacts?${query}` : "/contacts";

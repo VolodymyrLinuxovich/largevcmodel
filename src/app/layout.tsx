@@ -4,7 +4,7 @@ import { AppHeader } from "@/components/app-header";
 
 export const metadata: Metadata = {
   title: "LargeVCModel",
-  description: "AI-native operating system for VC relationship discovery and outreach.",
+  description: "Network intelligence for real professional relationships, research, contacts, and profiles.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

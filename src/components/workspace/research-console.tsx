@@ -93,15 +93,15 @@ const ENTITY_OPTIONS = [
 ];
 
 export function ResearchConsole({
-  provider,
   providerConfigured,
   contactsConnected,
+  initialQuery = "",
 }: {
-  provider: string;
   providerConfigured: boolean;
   contactsConnected: boolean;
+  initialQuery?: string;
 }) {
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialQuery);
   const [stage, setStage] = useState("");
   const [sector, setSector] = useState("");
   const [geography, setGeography] = useState("");
@@ -115,6 +115,8 @@ export function ResearchConsole({
   const [results, setResults] = useState<SearchResponse | null>(null);
   const [run, setRun] = useState<ResearchRun | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showFilters, setShowFilters] = useState(false);
+  const [researchNotice, setResearchNotice] = useState<string | null>(null);
 
   const payload = useMemo(
     () => ({
@@ -139,6 +141,7 @@ export function ResearchConsole({
   async function interpretObjective() {
     setLoading("interpreting");
     setError(null);
+    setResearchNotice(null);
     setRun(null);
     try {
       const response = await fetch("/api/query/interpret", {
@@ -159,6 +162,7 @@ export function ResearchConsole({
   async function searchNetwork() {
     setLoading("searching");
     setError(null);
+    setResearchNotice(null);
     setRun(null);
     try {
       const response = await fetch("/api/query", {
@@ -180,8 +184,13 @@ export function ResearchConsole({
 
   async function researchSelected() {
     if (!selectedResearchSubject) return;
+    if (!providerConfigured) {
+      setResearchNotice("Public research is unavailable until a provider is connected.");
+      return;
+    }
     setLoading("researching");
     setError(null);
+    setResearchNotice(null);
     try {
       const response = await fetch("/api/research", {
         method: "POST",
@@ -199,11 +208,11 @@ export function ResearchConsole({
   }
 
   return (
-    <div className="grid gap-8 xl:grid-cols-[430px_1fr]">
+    <div className="space-y-8">
       <section className="border-y border-border">
         <div className="border-b border-border p-4">
           <p className="eyebrow mb-2">COMMAND</p>
-          <h2 className="text-sm font-semibold uppercase tracking-[0.08em]">Network objective</h2>
+          <h2 className="text-sm font-semibold uppercase tracking-[0.08em]">What are you looking for?</h2>
         </div>
         <div className="space-y-4 p-4">
           <Textarea
@@ -215,31 +224,40 @@ export function ResearchConsole({
             placeholder="Find investors I spoke with last year, conversations about robotics, people who could introduce me to someone at Anduril..."
             aria-label="Natural language network intelligence query"
           />
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-            <Input value={sector} onChange={(event) => setSector(event.target.value)} placeholder="Sector or topic" aria-label="Sector or topic filter" />
-            <Input value={geography} onChange={(event) => setGeography(event.target.value)} placeholder="Geography" aria-label="Geography filter" />
-            <Input value={dateRange} onChange={(event) => setDateRange(event.target.value)} placeholder="Date range, e.g. last year" aria-label="Date range filter" />
-            <Input value={relationshipFilter} onChange={(event) => setRelationshipFilter(event.target.value)} placeholder="Relationship filter" aria-label="Relationship filter" />
-            <Select value={entityType} onChange={(event) => setEntityType(event.target.value)} aria-label="Entity type filter">
-              {ENTITY_OPTIONS.map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </Select>
-            <Select value={stage} onChange={(event) => setStage(event.target.value)} aria-label="Stage filter">
-              <option value="">Any stage</option>
-              <option value="pre-seed">Pre-seed</option>
-              <option value="seed">Seed</option>
-              <option value="Series A">Series A</option>
-              <option value="growth">Growth</option>
-            </Select>
-            <Select value={strictness} onChange={(event) => setStrictness(event.target.value as typeof strictness)} aria-label="Match strictness">
-              <option value="strict">Strict</option>
-              <option value="balanced">Balanced</option>
-              <option value="exploratory">Exploratory</option>
-            </Select>
-          </div>
+          <button
+            type="button"
+            className="text-[0.68rem] uppercase tracking-[0.14em] text-muted-foreground underline decoration-border underline-offset-4 transition-colors hover:text-foreground"
+            onClick={() => setShowFilters((value) => !value)}
+          >
+            {showFilters ? "Hide filters" : "Filters"}
+          </button>
+          {showFilters ? (
+            <div className="grid gap-3 border-y border-border py-4 sm:grid-cols-2 lg:grid-cols-3">
+              <Input value={sector} onChange={(event) => setSector(event.target.value)} placeholder="Sector or topic" aria-label="Sector or topic filter" />
+              <Input value={geography} onChange={(event) => setGeography(event.target.value)} placeholder="Geography" aria-label="Geography filter" />
+              <Input value={dateRange} onChange={(event) => setDateRange(event.target.value)} placeholder="Date range, e.g. last year" aria-label="Date range filter" />
+              <Input value={relationshipFilter} onChange={(event) => setRelationshipFilter(event.target.value)} placeholder="Relationship filter" aria-label="Relationship filter" />
+              <Select value={entityType} onChange={(event) => setEntityType(event.target.value)} aria-label="Entity type filter">
+                {ENTITY_OPTIONS.map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </Select>
+              <Select value={stage} onChange={(event) => setStage(event.target.value)} aria-label="Stage filter">
+                <option value="">Any stage</option>
+                <option value="pre-seed">Pre-seed</option>
+                <option value="seed">Seed</option>
+                <option value="Series A">Series A</option>
+                <option value="growth">Growth</option>
+              </Select>
+              <Select value={strictness} onChange={(event) => setStrictness(event.target.value as typeof strictness)} aria-label="Match strictness">
+                <option value="strict">Strict</option>
+                <option value="balanced">Balanced</option>
+                <option value="exploratory">Exploratory</option>
+              </Select>
+            </div>
+          ) : null}
           <div className="flex flex-wrap gap-2">
             <Button onClick={interpretObjective} disabled={!contactsConnected || !query || loading !== "idle"} variant="outline">
               Review interpretation
@@ -247,25 +265,23 @@ export function ResearchConsole({
             <Button onClick={searchNetwork} disabled={!contactsConnected || !query || loading !== "idle"}>
               Search network
             </Button>
-            <Button onClick={researchSelected} disabled={!providerConfigured || !selectedResearchSubject || loading !== "idle"} variant="outline">
+            <Button onClick={researchSelected} disabled={!selectedResearchSubject || loading !== "idle"} variant="outline">
               Research selected
             </Button>
           </div>
           {!contactsConnected ? (
             <p className="text-xs leading-5 text-[hsl(39_32%_70%)]">Connect and sync Google Contacts, Gmail, or Calendar before searching your network.</p>
           ) : null}
-          {!providerConfigured ? (
-            <p className="text-xs leading-5 text-[hsl(39_32%_70%)]">Research provider is {provider}. Connected-workspace search still works; public verification remains unavailable.</p>
-          ) : null}
+          {researchNotice ? <p className="text-xs leading-5 text-[hsl(39_32%_70%)]">{researchNotice}</p> : null}
           {error ? <p className="border-y border-border py-3 text-xs leading-5 text-[hsl(39_32%_70%)]">{error}</p> : null}
         </div>
       </section>
 
-      <section className="border-y border-border">
-        <div className="border-b border-border p-4">
+      <details className="border-y border-border">
+        <summary className="cursor-pointer list-none border-b border-border p-4">
           <p className="eyebrow mb-2">INTERPRETATION</p>
           <h2 className="text-sm font-semibold uppercase tracking-[0.08em]">Review before execution</h2>
-        </div>
+        </summary>
         {interpretation ? (
           <div className="divide-y divide-border">
             <InterpretationRow label="Looking for" values={interpretation.entityTypes.map(titleCase)} />
@@ -283,9 +299,9 @@ export function ResearchConsole({
             Review the parser output before searching. Empty criteria stay empty rather than being forced into an investment template.
           </div>
         )}
-      </section>
+      </details>
 
-      <section className="border-y border-border xl:col-span-2">
+      <section className="border-y border-border">
         <div className="grid gap-3 border-b border-border p-4 md:grid-cols-[1fr_auto] md:items-end">
           <div>
             <p className="eyebrow mb-2">RESULTS</p>
@@ -327,7 +343,7 @@ export function ResearchConsole({
       </section>
 
       {run ? (
-        <section className="border-y border-border xl:col-span-2">
+        <section className="border-y border-border">
           <div className="border-b border-border p-4">
             <p className="eyebrow mb-2">RESEARCH RUN</p>
             <h2 className="text-sm font-semibold uppercase tracking-[0.08em]">{run.status}</h2>

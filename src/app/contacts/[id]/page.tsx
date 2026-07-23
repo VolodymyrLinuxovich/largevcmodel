@@ -1,7 +1,5 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { ApiActionButton } from "@/components/workspace/api-action-button";
 import { EmptyState, HeroHeader, PageFrame, Section, SignInPanel, Timestamp } from "@/components/workspace/core";
 import { getWorkspaceData } from "@/lib/workspace";
@@ -23,7 +21,6 @@ export default async function ContactProfilePage({ params }: { params: Promise<{
       claims: { include: { sources: { include: { source: true } } }, orderBy: { createdAt: "desc" }, take: 20 },
       sources: { orderBy: { accessedAt: "desc" }, take: 20 },
       fitScores: { orderBy: { calculatedAt: "desc" }, take: 5 },
-      outreachDrafts: { orderBy: { updatedAt: "desc" }, take: 8 },
     },
   });
   if (!contact) notFound();
@@ -39,10 +36,9 @@ export default async function ContactProfilePage({ params }: { params: Promise<{
         title={contact.fullName ?? contact.primaryEmail ?? "Unnamed contact"}
         body={[contact.title, contact.organization].filter(Boolean).join(" / ") || "Role and organization unavailable from connected sources."}
         actions={
-          <>
-            <ApiActionButton endpoint="/api/scoring" payload={{ contactId: contact.id }} variant="outline">Calculate Score</ApiActionButton>
-            <ApiActionButton endpoint="/api/outreach/draft" payload={{ contactId: contact.id, format: "email", tone: "direct", version: "short" }}>Draft Outreach</ApiActionButton>
-          </>
+          <ApiActionButton endpoint="/api/scoring" payload={{ contactId: contact.id }} variant="outline">
+            Calculate Score
+          </ApiActionButton>
         }
       />
 
@@ -121,7 +117,7 @@ export default async function ContactProfilePage({ params }: { params: Promise<{
         )}
       </Section>
 
-      <section className="grid border-b border-border lg:grid-cols-3">
+      <section className="grid border-b border-border lg:grid-cols-2">
         <Panel title="Gmail threads" emptyTitle="No Gmail history" emptyBody="Connect and sync Gmail to view real conversation threads.">
           {contact.gmailThreads.map((thread) => (
             <a key={thread.id} href={thread.threadUrl ?? undefined} target="_blank" rel="noreferrer" className="block py-4 transition-colors hover:text-primary">
@@ -130,20 +126,12 @@ export default async function ContactProfilePage({ params }: { params: Promise<{
             </a>
           ))}
         </Panel>
-        <Panel title="Meetings" emptyTitle="No calendar history" emptyBody="Connect and sync Google Calendar to view real meetings for this contact.">
+        <Panel title="Calendar evidence" emptyTitle="No calendar history" emptyBody="Connect and sync Google Calendar to view calendar evidence for this contact.">
           {contact.calendarEvents.map((event) => (
             <a key={event.id} href={event.htmlLink ?? undefined} target="_blank" rel="noreferrer" className="block py-4 transition-colors hover:text-primary">
               <p className="text-sm font-semibold">{event.title ?? "Calendar event"}</p>
               <p className="mt-2 font-mono text-[0.7rem] uppercase tracking-[0.08em] text-muted-foreground"><Timestamp value={event.startsAt} /></p>
             </a>
-          ))}
-        </Panel>
-        <Panel title="Outreach history" emptyTitle="No outreach" emptyBody="Drafted, saved, sent, and replied states will appear here after Gmail actions.">
-          {contact.outreachDrafts.map((draft) => (
-            <Link key={draft.id} href="/outreach" className="block py-4 transition-colors hover:text-primary">
-              <p className="text-sm font-semibold">{draft.subject}</p>
-              <p className="mt-2 font-mono text-[0.7rem] uppercase tracking-[0.08em] text-muted-foreground">{draft.status.replaceAll("_", " ")}</p>
-            </Link>
           ))}
         </Panel>
       </section>

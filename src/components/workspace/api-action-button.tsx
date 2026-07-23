@@ -4,12 +4,14 @@ import { useState } from "react";
 import { Button, type ButtonProps } from "@/components/ui/button";
 
 export function ApiActionButton({
+  confirmMessage,
   endpoint,
   payload,
   children,
   onComplete,
   ...props
 }: ButtonProps & {
+  confirmMessage?: string;
   endpoint: string;
   payload?: Record<string, unknown>;
   onComplete?: (payload: unknown) => void;
@@ -17,6 +19,7 @@ export function ApiActionButton({
   const [state, setState] = useState<"idle" | "loading" | "done" | "error">("idle");
 
   async function run() {
+    if (confirmMessage && !window.confirm(confirmMessage)) return;
     setState("loading");
     try {
       const response = await fetch(endpoint, {

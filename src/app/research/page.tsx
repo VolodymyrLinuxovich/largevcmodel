@@ -7,9 +7,14 @@ import { getWorkspaceData, integrationConnected } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
 
-export default async function ResearchPage() {
+export default async function ResearchPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ q?: string }>;
+}) {
   const data = await getWorkspaceData();
   if (!data.user) return <SignInPanel data={data} />;
+  const { q = "" } = searchParams ? await searchParams : {};
   const contactsConnected =
     integrationConnected(data, IntegrationService.GOOGLE_CONTACTS) ||
     integrationConnected(data, IntegrationService.GMAIL) ||
@@ -29,9 +34,9 @@ export default async function ResearchPage() {
           <EmptyState title="Connect relationship data first" body="Network search starts from real Contacts, Gmail, or Calendar records. Connect and sync at least one source before running a query." action={<Button asChild><Link href="/settings">Connect Sources</Link></Button>} />
         ) : (
           <ResearchConsole
-            provider={data.configuration.researchProvider}
             providerConfigured={providerConfigured}
             contactsConnected={contactsConnected}
+            initialQuery={q}
           />
         )}
       </Section>

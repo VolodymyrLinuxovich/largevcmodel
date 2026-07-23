@@ -1,251 +1,205 @@
 import Link from "next/link";
-import type { ReactNode } from "react";
-import { IntegrationService } from "@prisma/client";
+import { ResearchStatus } from "@prisma/client";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import {
-  AccessTrustSection,
-  EmptyState,
-  HeroHeader,
-  IntegrationStatusPanel,
-  PageFrame,
-  Section,
-  SignInPanel,
-  Timestamp,
-} from "@/components/workspace/core";
-import { SyncJobRunner } from "@/components/workspace/sync-job-runner";
-import { getWorkspaceData, integrationConnected, outreachStatusLabel, type MetricValue } from "@/lib/workspace";
+import { Input } from "@/components/ui/input";
+import { EmptyState, PageFrame, Section, Timestamp } from "@/components/workspace/core";
+import { getCurrentUser } from "@/lib/auth/current-user";
+import { isDatabaseConfigured, isGoogleOAuthConfigured } from "@/lib/config";
+import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
-export default async function OverviewPage({ searchParams }: { searchParams?: Promise<{ sync?: string }> }) {
-  const data = await getWorkspaceData();
-  if (!data.user) return <SignInPanel data={data} />;
-  const { sync } = searchParams ? await searchParams : {};
+export default async function OverviewPage() {
+  const user = await getCurrentUser();
+  if (!user) return <PublicHome canConnect={isDatabaseConfigured() && isGoogleOAuthConfigured()} />;
 
-  const contactsConnected = integrationConnected(data, IntegrationService.GOOGLE_CONTACTS) || integrationConnected(data, IntegrationService.GMAIL);
-  const gmailConnected = integrationConnected(data, IntegrationService.GMAIL);
-  const calendarConnected = integrationConnected(data, IntegrationService.GOOGLE_CALENDAR);
-  const lastSyncedAt = data.integrations
-    .map((integration) => integration.lastSyncedAt)
-    .filter(Boolean)
-    .sort((a, b) => b!.getTime() - a!.getTime())[0];
+  const [profile, researchRuns, profileActivity] = await Promise.all([
+    prisma.userProfile.findUnique({
+      where: { userId: user.id },
+      select: { username: true },
+    }),
+    prisma.researchRun.findMany({
+      where: { userId: user.id },
+      orderBy: { createdAt: "desc" },
+      take: 3,
+      select: { id: true, query: true, status: true, createdAt: true },
+    }),
+    prisma.profileActivity.findMany({
+      where: { ownerUserId: user.id },
+      orderBy: { createdAt: "desc" },
+      take: 3,
+      select: { id: true, activityType: true, text: true, createdAt: true },
+    }),
+  ]);
+
+  const recentWork = [
+    ...researchRuns.map((run) => ({
+      id: `research-${run.id}`,
+      label: "Research",
+      title: run.query,
+      detail: statusLabel(run.status),
+      href: "/research",
+      timestamp: run.createdAt,
+    })),
+    ...profileActivity.map((activity) => ({
+      id: `profile-${activity.id}`,
+      label: "Profile",
+      title: activity.text,
+      detail: activity.activityType.replaceAll("_", " ").toLowerCase(),
+      href: profile?.username ? `/profile/${profile.username}` : "/profile",
+      timestamp: activity.createdAt,
+    })),
+  ]
+    .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
+    .slice(0, 5);
 
   return (
     <PageFrame>
-      <HeroHeader
-        eyebrow="NETWORK INTELLIGENCE / LIVE WORKSPACE"
-        title="Your network, research, and outreach in one system."
-        body="Connect your professional relationships, research relevant people and companies, identify warm paths, draft informed outreach, and coordinate meetings from one auditable workspace."
-        supportingLine="Private workspace for real contacts, Gmail, Calendar, and research workflows."
-        size="home"
-        actions={
-          <>
-            <Button asChild size="lg">
-              <Link href="/settings">Connect Workspace</Link>
-            </Button>
-            <Button asChild size="lg" variant="outline">
-              <Link href="/settings">Review Configuration</Link>
-            </Button>
-          </>
-        }
-      />
+      <section className="px-5 py-24 sm:px-8 lg:min-h-[calc(100svh-72px)] lg:px-10 lg:py-32">
+        <div className="mx-auto w-full max-w-[1480px]">
+          <p className="eyebrow">Network intelligence / private workspace</p>
+          <h1 className="mt-8 max-w-5xl text-5xl font-medium leading-[0.96] sm:text-7xl lg:text-8xl">
+            Welcome back, {firstName(user.name ?? user.email)}.
+          </h1>
+          <p className="mt-7 max-w-2xl text-sm leading-7 text-muted-foreground sm:text-base">
+            Search your network, review contacts, or continue recent research without exposing raw inbox or calendar data on the overview.
+          </p>
 
-      <Section eyebrow="ACCESS / TRUST" title="Private infrastructure for sensitive relationship work.">
-        <AccessTrustSection />
-      </Section>
-
-      <Section eyebrow="CONFIGURATION / ONBOARDING" title="Workspace setup status">
-        <IntegrationStatusPanel data={data} />
-        <SyncJobRunner enabled={sync === "started" || data.syncJobs.some((job) => job.status === "PENDING" || job.status === "RUNNING")} />
-      </Section>
-
-      <Section eyebrow="CONTACTS / NETWORK" title="Live network overview">
-        <div className="grid gap-10 xl:grid-cols-[0.72fr_1.28fr]">
-          <LineStats
-            rows={[
-              { label: "Total contacts", value: data.metrics.connectedContacts, unavailable: "Connect Contacts or Gmail." },
-              { label: "Recent interactions", value: data.relationshipActivity.length || null, unavailable: "Connect and sync Gmail or Calendar." },
-              { label: "Strongest relationships", value: data.priorityContacts.length || null, unavailable: "No relationship evidence imported." },
-              { label: "Last synced", value: lastSyncedAt ? <Timestamp value={lastSyncedAt} /> : null, unavailable: "No integration has synced." },
-            ]}
-          />
-          <div>
-            <div className="mb-5 flex items-end justify-between gap-4">
-              <div>
-                <p className="eyebrow mb-2">RELATIONSHIP ACTIVITY</p>
-                <h3 className="text-lg font-semibold uppercase tracking-[0.06em]">Recent signals</h3>
-              </div>
-              <Button asChild variant="outline" size="sm">
-                <Link href="/contacts">Open contacts</Link>
-              </Button>
-            </div>
-            {data.relationshipActivity.length ? (
-              <div className="divide-y divide-border border-y border-border">
-                {data.relationshipActivity.map((item) => (
-                  <a
-                    key={item.id}
-                    href={item.href ?? undefined}
-                    target={item.href ? "_blank" : undefined}
-                    rel={item.href ? "noreferrer" : undefined}
-                    className="grid gap-3 py-5 transition-colors hover:text-primary md:grid-cols-[120px_1fr_180px]"
-                  >
-                    <Badge variant="outline">{item.type}</Badge>
-                    <div>
-                      <p className="text-sm font-semibold">{item.title}</p>
-                      <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{item.detail ?? "No snippet available."}</p>
-                    </div>
-                    <p className="font-mono text-[0.68rem] uppercase tracking-[0.12em] text-muted-foreground md:text-right">
-                      <Timestamp value={item.timestamp} />
-                    </p>
-                  </a>
-                ))}
-              </div>
-            ) : (
-              <EmptyState
-                title={contactsConnected ? "No activity found" : "Integrations required"}
-                body={contactsConnected ? "Connected accounts have not produced relationship activity for this workspace yet." : "Connect Gmail and Calendar to populate real relationship activity."}
-              />
-            )}
-          </div>
-        </div>
-
-        <div className="mt-14">
-          <div className="mb-5 flex items-end justify-between gap-4">
-            <div>
-              <p className="eyebrow mb-2">STRONGEST RELATIONSHIPS</p>
-              <h3 className="text-lg font-semibold uppercase tracking-[0.06em]">Priority contacts</h3>
-            </div>
-          </div>
-          {data.priorityContacts.length ? (
-            <div className="divide-y divide-border border-y border-border">
-              {data.priorityContacts.map((contact) => (
-                <Link key={contact.id} href={`/contacts/${contact.id}`} className="grid gap-4 py-5 transition-colors hover:text-primary md:grid-cols-[1fr_180px_180px]">
-                  <div>
-                    <p className="text-sm font-semibold">{contact.fullName ?? contact.primaryEmail ?? "Unnamed contact"}</p>
-                    <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                      {[contact.title, contact.organization].filter(Boolean).join(" / ") || "Role unavailable"}
-                    </p>
-                  </div>
-                  <p className="font-mono text-[0.68rem] uppercase tracking-[0.12em] text-muted-foreground">
-                    {contact.interactionCount} interactions
-                  </p>
-                  <p className="font-mono text-[0.68rem] uppercase tracking-[0.12em] text-muted-foreground md:text-right">
-                    <Timestamp value={contact.lastInteractionAt} />
-                  </p>
-                </Link>
-              ))}
-            </div>
-          ) : (
-            <EmptyState
-              title={contactsConnected ? "No results found" : "No contacts connected"}
-              body={contactsConnected ? "Your connected account contains no contacts matching the selected workspace filters." : "Connect Google Contacts or Gmail to build the network index."}
+          <form action="/research" className="mt-12 grid max-w-3xl gap-3 sm:grid-cols-[1fr_auto]">
+            <Input
+              name="q"
+              placeholder="Search people, companies, conversations, or professional context..."
+              aria-label="Search network"
+              className="h-12 bg-transparent text-base"
             />
-          )}
+            <Button type="submit" size="lg">
+              Search
+            </Button>
+          </form>
+
+          <div className="mt-8 flex flex-wrap gap-3">
+            <Button asChild variant="outline">
+              <Link href="/research">Start research</Link>
+            </Button>
+            <Button asChild variant="outline">
+              <Link href="/contacts">Browse contacts</Link>
+            </Button>
+            <Button asChild variant="outline">
+              <Link href="/settings/profile">Edit profile</Link>
+            </Button>
+          </div>
         </div>
-      </Section>
+      </section>
 
-      <Section eyebrow="RESEARCH" title="Research runs and evidence">
-        {data.recentResearch.length ? (
+      <Section eyebrow="Recent work" title="Continue where you left off.">
+        {recentWork.length ? (
           <div className="divide-y divide-border border-y border-border">
-            {data.recentResearch.map((run) => (
-              <Link key={run.id} href="/research" className="grid gap-4 py-5 transition-colors hover:text-primary md:grid-cols-[1fr_140px_160px_160px]">
-                <p className="line-clamp-2 text-sm font-semibold">{run.query}</p>
-                <Badge variant={run.status === "COMPLETED" ? "success" : "warning"}>{run.status}</Badge>
-                <p className="font-mono text-[0.68rem] uppercase tracking-[0.12em] text-muted-foreground">
-                  {run.sourceCount} sources / {run.claimCount} claims
-                </p>
-                <p className="font-mono text-[0.68rem] uppercase tracking-[0.12em] text-muted-foreground md:text-right">
-                  fit {run.fitScore ?? "N/A"} / <Timestamp value={run.createdAt} />
-                </p>
-              </Link>
-            ))}
-          </div>
-        ) : (
-          <EmptyState title="No research runs" body="Start research on a real contact or company after connecting a research provider." />
-        )}
-      </Section>
-
-      <Section eyebrow="OUTREACH" title="Drafts, sends, replies, and follow-ups">
-        {data.outreachStatus.length ? (
-          <div className="divide-y divide-border border-y border-border">
-            {data.outreachStatus.map((draft) => (
-              <Link key={draft.id} href="/outreach" className="grid gap-4 py-5 transition-colors hover:text-primary md:grid-cols-[1fr_180px_180px]">
-                <p className="text-sm font-semibold">{draft.subject}</p>
-                <p className="font-mono text-[0.68rem] uppercase tracking-[0.12em] text-muted-foreground">
-                  {outreachStatusLabel(draft.status)}
-                </p>
-                <p className="font-mono text-[0.68rem] uppercase tracking-[0.12em] text-muted-foreground md:text-right">
-                  <Timestamp value={draft.updatedAt} />
-                </p>
-              </Link>
-            ))}
-          </div>
-        ) : (
-          <EmptyState title={gmailConnected ? "No outreach drafts" : "Gmail not connected"} body={gmailConnected ? "No Gmail-backed outreach records exist yet." : "Connect Gmail to create drafts and track replies."} />
-        )}
-      </Section>
-
-      <Section eyebrow="MEETINGS" title="Calendar context">
-        {data.upcomingMeetings.length ? (
-          <div className="divide-y divide-border border-y border-border">
-            {data.upcomingMeetings.map((meeting) => (
-              <a key={meeting.id} href={meeting.htmlLink ?? undefined} target="_blank" rel="noreferrer" className="grid gap-4 py-5 transition-colors hover:text-primary md:grid-cols-[1fr_180px_160px]">
-                <p className="text-sm font-semibold">{meeting.title ?? "Calendar event"}</p>
-                <p className="font-mono text-[0.68rem] uppercase tracking-[0.12em] text-muted-foreground">
-                  {meeting.attendees.length} attendees
-                </p>
-                <p className="font-mono text-[0.68rem] uppercase tracking-[0.12em] text-muted-foreground md:text-right">
-                  <Timestamp value={meeting.startsAt} />
-                </p>
-              </a>
-            ))}
-          </div>
-        ) : (
-          <EmptyState title={calendarConnected ? "No upcoming meetings" : "Calendar not connected"} body={calendarConnected ? "No upcoming imported calendar events were found." : "Connect Google Calendar to display real meetings."} />
-        )}
-      </Section>
-
-      <Section eyebrow="AUDIT LOG" title="Operational history">
-        {data.auditEvents.length ? (
-          <div className="divide-y divide-border border-y border-border">
-            {data.auditEvents.map((event) => (
-              <div key={event.id} className="grid gap-4 py-5 md:grid-cols-[1fr_160px_220px]">
+            {recentWork.map((item) => (
+              <Link
+                key={item.id}
+                href={item.href}
+                className="grid gap-4 py-5 transition-colors hover:text-primary md:grid-cols-[140px_1fr_160px]"
+              >
+                <p className="eyebrow">{item.label}</p>
                 <div>
-                  <p className="text-sm font-semibold">{event.action}</p>
-                  <p className="mt-1 text-xs leading-5 text-muted-foreground">{event.dataSource ?? "workspace"}</p>
+                  <p className="line-clamp-2 text-sm font-medium">{item.title}</p>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">{item.detail}</p>
                 </div>
-                <Badge variant={event.outcome === "completed" ? "success" : "warning"}>{event.outcome}</Badge>
                 <p className="font-mono text-[0.68rem] uppercase tracking-[0.12em] text-muted-foreground md:text-right">
-                  <Timestamp value={event.timestamp} />
+                  <Timestamp value={item.timestamp} />
                 </p>
-              </div>
+              </Link>
             ))}
           </div>
         ) : (
-          <EmptyState title="No audit events" body="System and user actions will appear here once integrations are connected or records are updated." />
+          <EmptyState
+            title="No recent work"
+            body="Recent searches, saved research, opened contacts, and profile updates will appear here after you create them."
+          />
         )}
       </Section>
     </PageFrame>
   );
 }
 
-function LineStats({
-  rows,
-}: {
-  rows: Array<{ label: string; value: MetricValue | ReactNode; unavailable: string }>;
-}) {
+function PublicHome({ canConnect }: { canConnect: boolean }) {
   return (
-    <div className="border-y border-border">
-      {rows.map((row) => (
-        <div key={row.label} className="grid gap-3 border-b border-border py-5 last:border-b-0 sm:grid-cols-[180px_1fr]">
-          <p className="eyebrow">{row.label}</p>
-          <div>
-            <p className="font-mono text-2xl text-foreground">{row.value === null ? "N/A" : row.value}</p>
-            {row.value === null ? <p className="mt-2 text-xs leading-5 text-muted-foreground">{row.unavailable}</p> : null}
+    <PageFrame>
+      <section className="px-5 py-24 sm:px-8 lg:min-h-[calc(100svh-72px)] lg:px-10 lg:py-32">
+        <div className="mx-auto w-full max-w-[1480px]">
+          <p className="eyebrow">Network intelligence</p>
+          <h1 className="mt-8 max-w-4xl text-6xl font-medium leading-[0.94] sm:text-8xl lg:text-9xl">
+            LargeVCModel
+          </h1>
+          <p className="mt-8 max-w-2xl text-xl leading-8 text-foreground sm:text-2xl">
+            Network intelligence for founders, investors, and operators.
+          </p>
+          <p className="mt-5 max-w-xl text-sm leading-7 text-muted-foreground sm:text-base">
+            Research people and companies, understand your professional network, and turn connected data into useful context.
+            Private, evidence-based, and built around real relationships.
+          </p>
+          <div className="mt-10 flex flex-wrap gap-3">
+            {canConnect ? (
+              <Button asChild size="lg">
+                <Link href="/api/auth/google/start?service=signin">Explore</Link>
+              </Button>
+            ) : (
+              <Button size="lg" disabled>
+                Explore
+              </Button>
+            )}
           </div>
         </div>
-      ))}
-    </div>
+      </section>
+
+      <Section eyebrow="Product statement" title="Connected intelligence">
+        <p className="max-w-3xl text-sm leading-7 text-muted-foreground sm:text-base">
+          LargeVCModel combines contact context, communication history, profile data, and research evidence in one private workspace.
+        </p>
+      </Section>
+
+      <Section eyebrow="Core capabilities" title="Built around useful context.">
+        <div className="grid border-y border-border lg:grid-cols-3">
+          {[
+            ["Research", "Search people, organizations, conversations, and professional context using natural language."],
+            ["Contacts", "Organize real contacts and understand where relationships come from."],
+            ["Profiles", "Showcase products, projects, achievements, and professional activity."],
+          ].map(([title, body]) => (
+            <div key={title} className="border-b border-border py-8 lg:border-b-0 lg:border-r lg:px-8 lg:first:pl-0 lg:last:border-r-0">
+              <p className="eyebrow">{title}</p>
+              <p className="mt-5 max-w-sm text-sm leading-7 text-muted-foreground">{body}</p>
+            </div>
+          ))}
+        </div>
+      </Section>
+
+      <section className="px-5 py-24 sm:px-8 lg:px-10 lg:py-32">
+        <div className="mx-auto w-full max-w-[1480px]">
+          <p className="eyebrow">Workspace</p>
+          <h2 className="mt-5 max-w-3xl text-4xl font-medium leading-tight sm:text-6xl">
+            Build with the network you already have.
+          </h2>
+          <div className="mt-10">
+            {canConnect ? (
+              <Button asChild size="lg" variant="outline">
+                <Link href="/api/auth/google/start?service=signin">Connect workspace</Link>
+              </Button>
+            ) : (
+              <Button size="lg" variant="outline" disabled>
+                Connect workspace
+              </Button>
+            )}
+          </div>
+        </div>
+      </section>
+    </PageFrame>
   );
+}
+
+function firstName(value: string) {
+  return value.split(/[ @]/).filter(Boolean)[0] ?? "there";
+}
+
+function statusLabel(status: ResearchStatus) {
+  return status.replaceAll("_", " ").toLowerCase();
 }
