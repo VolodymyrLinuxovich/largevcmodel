@@ -1,10 +1,12 @@
 import "server-only";
 
-import { IntegrationService, PrismaClient } from "@prisma/client";
+import { ContactInteractionType, IntegrationService, Prisma, PrismaClient } from "@prisma/client";
 import { googleFetch, getConnectedIntegration } from "./api";
 import { audit } from "@/lib/audit";
+import { recalculateRelationshipStrength } from "@/lib/domain/relationships";
 
 type CalendarEventsResponse = {
+  nextPageToken?: string;
   items?: Array<{
     id: string;
     summary?: string;
@@ -36,7 +38,11 @@ function eventDate(value?: { dateTime?: string; date?: string }) {
   return new Date(value.dateTime ?? `${value.date}T00:00:00.000Z`);
 }
 
-export async function syncGoogleCalendar(prisma: PrismaClient, userId: string) {
+export async function syncGoogleCalendar(
+  prisma: PrismaClient,
+  userId: string,
+  options: { pageToken?: string | null; maxResults?: number } = {},
+) {
   const integration = await getConnectedIntegration(prisma, userId, IntegrationService.GOOGLE_CALENDAR);
   await prisma.integration.update({ where: { id: integration.id }, data: { syncStatus: "syncing", lastError: null } });
 
@@ -46,7 +52,8 @@ export async function syncGoogleCalendar(prisma: PrismaClient, userId: string) {
     url.searchParams.set("orderBy", "startTime");
     url.searchParams.set("timeMin", new Date(Date.now() - 1000 * 60 * 60 * 24 * 90).toISOString());
     url.searchParams.set("timeMax", new Date(Date.now() + 1000 * 60 * 60 * 24 * 90).toISOString());
-    url.searchParams.set("maxResults", "100");
+    url.searchParams.set("maxResults", String(options.maxResults ?? 100));
+    if (options.pageToken) url.searchParams.set("pageToken", options.pageToken);
     const payload = await googleFetch<CalendarEventsResponse>(prisma, userId, IntegrationService.GOOGLE_CALENDAR, url.toString());
 
     let imported = 0;
@@ -58,6 +65,10 @@ export async function syncGoogleCalendar(prisma: PrismaClient, userId: string) {
       const matchingContact = attendees.length
         ? await prisma.contact.findFirst({ where: { userId, primaryEmail: { in: attendees.map((email) => email.toLowerCase()) } } })
         : null;
+      const existingEvent = await prisma.calendarEvent.findUnique({
+        where: { userId_calendarId_providerEventId: { userId, calendarId: "primary", providerEventId: event.id } },
+        select: { id: true },
+      });
 
       await prisma.calendarEvent.upsert({
         where: { userId_calendarId_providerEventId: { userId, calendarId: "primary", providerEventId: event.id } },
@@ -89,6 +100,38 @@ export async function syncGoogleCalendar(prisma: PrismaClient, userId: string) {
         },
       });
       if (matchingContact) {
+        await prisma.contact.update({
+          where: { id: matchingContact.id },
+          data: {
+            interactionCount: existingEvent ? undefined : { increment: 1 },
+            lastInteractionAt: startsAt,
+          },
+        });
+        await prisma.contactInteraction.upsert({
+          where: {
+            userId_type_providerId: {
+              userId,
+              type: ContactInteractionType.CALENDAR_MEETING,
+              providerId: event.id,
+            },
+          },
+          create: {
+            userId,
+            contactId: matchingContact.id,
+            type: ContactInteractionType.CALENDAR_MEETING,
+            providerId: event.id,
+            occurredAt: startsAt,
+            metadata: {
+              title: event.summary ?? null,
+              attendeeEmails: attendees,
+              htmlLink: event.htmlLink ?? null,
+            } as Prisma.InputJsonObject,
+          },
+          update: {
+            contactId: matchingContact.id,
+            occurredAt: startsAt,
+          },
+        });
         await prisma.relationshipEdge.upsert({
           where: {
             userId_fromNodeId_toNodeId_relationship_source: {
@@ -119,13 +162,20 @@ export async function syncGoogleCalendar(prisma: PrismaClient, userId: string) {
             sourceRecordId: event.id,
           },
         });
+        await recalculateRelationshipStrength(prisma, userId, matchingContact.id);
       }
       imported += 1;
     }
 
     await prisma.integration.update({
       where: { id: integration.id },
-      data: { syncStatus: "idle", lastSyncedAt: new Date(), lastError: null },
+      data: {
+        syncStatus: payload.nextPageToken ? "queued" : "idle",
+        syncCursor: payload.nextPageToken ? ({ pageToken: payload.nextPageToken } as Prisma.InputJsonObject) : Prisma.JsonNull,
+        recordsProcessed: { increment: imported },
+        lastSyncedAt: payload.nextPageToken ? integration.lastSyncedAt : new Date(),
+        lastError: null,
+      },
     });
     await audit(prisma, {
       userId,
@@ -133,9 +183,9 @@ export async function syncGoogleCalendar(prisma: PrismaClient, userId: string) {
       action: "Calendar events imported",
       outcome: "completed",
       dataSource: "Google Calendar",
-      details: `${imported} events processed from the primary calendar.`,
+      details: `${imported} events processed from the primary calendar.${payload.nextPageToken ? " More pages remain." : ""}`,
     });
-    return { imported };
+    return { imported, nextPageToken: payload.nextPageToken ?? null, done: !payload.nextPageToken };
   } catch (error) {
     await prisma.integration.update({
       where: { id: integration.id },

@@ -1,13 +1,13 @@
 import "server-only";
 
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 
 const ALGORITHM = "aes-256-gcm";
 
 function keyBytes() {
-  const configured = process.env.TOKEN_ENCRYPTION_KEY || process.env.SESSION_SECRET || "";
+  const configured = process.env.TOKEN_ENCRYPTION_KEY || "";
   if (!configured) {
-    throw new Error("TOKEN_ENCRYPTION_KEY or SESSION_SECRET is required for token encryption");
+    throw new Error("TOKEN_ENCRYPTION_KEY is required for token encryption");
   }
 
   if (/^[a-f0-9]{64}$/i.test(configured)) {
@@ -18,10 +18,13 @@ function keyBytes() {
     const decoded = Buffer.from(configured, "base64");
     if (decoded.length === 32) return decoded;
   } catch {
-    // Fall through to hash derivation.
+    // Fall through to UTF-8 validation.
   }
 
-  return createHash("sha256").update(configured).digest();
+  const utf8 = Buffer.from(configured, "utf8");
+  if (utf8.length === 32) return utf8;
+
+  throw new Error("TOKEN_ENCRYPTION_KEY must be exactly 32 bytes, or a 32-byte base64/64-character hex value");
 }
 
 export function encryptSecret(value: string) {

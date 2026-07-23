@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { clearOAuthStateCookie, setSessionCookie, verifyOAuthState } from "@/lib/auth/session";
 import { encryptSecret } from "@/lib/security/encryption";
 import { exchangeCodeForTokens, fetchGoogleUserInfo, sessionFromGoogleUser } from "@/lib/google/oauth";
+import { queueInitialGoogleSyncJobs } from "@/lib/sync/jobs";
 
 function serviceToIntegration(service: string) {
   if (service === "gmail") return IntegrationService.GMAIL;
@@ -61,35 +62,43 @@ export async function GET(request: Request) {
     });
 
     const integrationService = serviceToIntegration(statePayload.service);
-    if (integrationService) {
+    const integrationServices = integrationService
+      ? [integrationService]
+      : [IntegrationService.GOOGLE_CONTACTS, IntegrationService.GMAIL, IntegrationService.GOOGLE_CALENDAR];
+    const tokenScopes = tokens.scope?.split(" ").filter(Boolean) ?? [];
+
+    for (const service of integrationServices) {
       const existing = await prisma.integration.findUnique({
-        where: { userId_provider_service: { userId: user.id, provider: "google", service: integrationService } },
+        where: { userId_provider_service: { userId: user.id, provider: "google", service } },
       });
+      if (!tokens.refresh_token && !existing?.refreshTokenCiphertext) {
+        throw new Error("Google did not return a refresh token. Reconnect the account and approve offline access.");
+      }
       await prisma.integration.upsert({
-        where: { userId_provider_service: { userId: user.id, provider: "google", service: integrationService } },
+        where: { userId_provider_service: { userId: user.id, provider: "google", service } },
         create: {
           userId: user.id,
           provider: "google",
-          service: integrationService,
+          service,
           status: IntegrationStatus.CONNECTED,
           accountEmail: googleUser.email.toLowerCase(),
           providerAccountId: googleUser.sub,
-          scopes: tokens.scope?.split(" ") ?? [],
+          scopes: tokenScopes,
           accessTokenCiphertext: encryptSecret(tokens.access_token),
           refreshTokenCiphertext: tokens.refresh_token ? encryptSecret(tokens.refresh_token) : null,
           tokenExpiresAt: tokens.expires_in ? new Date(Date.now() + tokens.expires_in * 1000) : null,
-          syncStatus: "idle",
+          syncStatus: "queued",
           disconnectedAt: null,
         },
         update: {
           status: IntegrationStatus.CONNECTED,
           accountEmail: googleUser.email.toLowerCase(),
           providerAccountId: googleUser.sub,
-          scopes: tokens.scope?.split(" ") ?? [],
+          scopes: tokenScopes,
           accessTokenCiphertext: encryptSecret(tokens.access_token),
           refreshTokenCiphertext: tokens.refresh_token ? encryptSecret(tokens.refresh_token) : existing?.refreshTokenCiphertext,
           tokenExpiresAt: tokens.expires_in ? new Date(Date.now() + tokens.expires_in * 1000) : null,
-          syncStatus: "idle",
+          syncStatus: "queued",
           lastError: null,
           disconnectedAt: null,
         },
@@ -100,23 +109,30 @@ export async function GET(request: Request) {
         actorType: "USER",
         action: "Integration connected",
         outcome: "completed",
-        dataSource: integrationService,
-        details: `${statePayload.service} connected via Google OAuth.`,
-      });
-    } else {
-      await audit(prisma, {
-        userId: user.id,
-        actor: user.email,
-        actorType: "USER",
-        action: "User signed in",
-        outcome: "completed",
-        dataSource: "Google OAuth",
+        dataSource: service,
+        details: `${service} connected via Google OAuth. Tokens were encrypted before storage.`,
       });
     }
 
-    const response = NextResponse.redirect(new URL(integrationService ? "/settings?connected=google" : "/", request.url));
+    await queueInitialGoogleSyncJobs(prisma, {
+      userId: user.id,
+      actor: user.email,
+      services: integrationServices,
+    });
+
+    await audit(prisma, {
+      userId: user.id,
+      actor: user.email,
+      actorType: "USER",
+      action: "User signed in",
+      outcome: "completed",
+      dataSource: "Google OAuth",
+      details: "Session created and initial Google sync jobs queued.",
+    });
+
+    const response = NextResponse.redirect(new URL("/overview?sync=started", request.url));
     clearOAuthStateCookie(response);
-    setSessionCookie(response, sessionFromGoogleUser(googleUser, user.id));
+    await setSessionCookie(response, sessionFromGoogleUser(googleUser, user.id));
     return response;
   } catch (callbackError) {
     const response = NextResponse.redirect(new URL(`/settings?error=${encodeURIComponent(callbackError instanceof Error ? callbackError.message : "google_oauth_callback_failed")}`, request.url));

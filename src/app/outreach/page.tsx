@@ -87,7 +87,7 @@ export default async function OutreachPage() {
             })}
           </div>
         ) : (
-          <EmptyState title="No outreach records" body="Open a real contact profile and generate a draft from available evidence. LargeVCModel will not create sample outreach." />
+          <EmptyState title="No outreach records" body="Open a real contact profile and generate a draft from available evidence. LargeVCModel will not create outreach without selected contact context." />
         )}
       </Section>
     </PageFrame>

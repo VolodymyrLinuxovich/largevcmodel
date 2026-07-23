@@ -24,7 +24,7 @@ export default async function GraphPage() {
       />
       <Section title="Graph workspace">
         {!connected ? (
-          <EmptyState title="No relationship data connected" body="Connect Gmail, Google Contacts, or Calendar to build relationship edges. The graph does not include sample nodes." />
+          <EmptyState title="No relationship data connected" body="Connect Gmail, Google Contacts, or Calendar to build relationship edges. The graph only renders relationships with supporting evidence." />
         ) : edges.length ? (
           <RelationshipGraph edges={edges} />
         ) : (

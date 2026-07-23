@@ -3,20 +3,26 @@ import "server-only";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
 
 const SESSION_COOKIE = "lvc_session";
 const OAUTH_STATE_COOKIE = "lvc_oauth_state";
+const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 
 export type SessionPayload = {
   userId: string;
   email: string;
   name?: string | null;
-  iat: number;
 };
 
 type OAuthStatePayload = {
   state: string;
   service: "signin" | "gmail" | "contacts" | "calendar";
+  createdAt: number;
+};
+
+type SessionCookiePayload = {
+  sessionId: string;
   createdAt: number;
 };
 
@@ -54,17 +60,55 @@ export async function getSession() {
   const cookieStore = await cookies();
   const token = cookieStore.get(SESSION_COOKIE)?.value;
   if (!token) return null;
-  return decodeSigned<SessionPayload>(token);
+  const payload = decodeSigned<SessionCookiePayload>(token);
+  if (!payload?.sessionId) return null;
+
+  try {
+    const session = await prisma.session.findUnique({
+      where: { id: payload.sessionId },
+      include: {
+        user: { select: { id: true, email: true, name: true } },
+      },
+    });
+    if (!session || session.expiresAt <= new Date()) {
+      if (session) await prisma.session.delete({ where: { id: session.id } }).catch(() => undefined);
+      return null;
+    }
+    return {
+      userId: session.user.id,
+      email: session.user.email,
+      name: session.user.name,
+    } satisfies SessionPayload;
+  } catch {
+    return null;
+  }
 }
 
-export function setSessionCookie(response: NextResponse, payload: Omit<SessionPayload, "iat">) {
-  response.cookies.set(SESSION_COOKIE, encodeSigned({ ...payload, iat: Date.now() }), {
+export async function setSessionCookie(response: NextResponse, payload: SessionPayload) {
+  const session = await prisma.session.create({
+    data: {
+      id: randomBytes(32).toString("base64url"),
+      userId: payload.userId,
+      expiresAt: new Date(Date.now() + SESSION_MAX_AGE_SECONDS * 1000),
+    },
+  });
+
+  response.cookies.set(SESSION_COOKIE, encodeSigned<SessionCookiePayload>({ sessionId: session.id, createdAt: Date.now() }), {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
     path: "/",
-    maxAge: 60 * 60 * 24 * 30,
+    maxAge: SESSION_MAX_AGE_SECONDS,
   });
+}
+
+export async function destroyCurrentSession() {
+  const cookieStore = await cookies();
+  const token = cookieStore.get(SESSION_COOKIE)?.value;
+  if (!token) return;
+  const payload = decodeSigned<SessionCookiePayload>(token);
+  if (!payload?.sessionId) return;
+  await prisma.session.delete({ where: { id: payload.sessionId } }).catch(() => undefined);
 }
 
 export function clearSessionCookie(response: NextResponse) {

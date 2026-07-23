@@ -1,8 +1,9 @@
 import "server-only";
 
-import { ContactSource, IntegrationService, PrismaClient } from "@prisma/client";
+import { ContactInteractionType, ContactSource, IntegrationService, Prisma, PrismaClient } from "@prisma/client";
 import { googleFetch, getConnectedIntegration } from "./api";
 import { audit } from "@/lib/audit";
+import { recalculateRelationshipStrength } from "@/lib/domain/relationships";
 
 type GmailListResponse = { messages?: Array<{ id: string; threadId: string }>; nextPageToken?: string };
 type GmailMessageResponse = {
@@ -33,6 +34,20 @@ function emailsFromHeader(value?: string | null) {
     .filter(Boolean) as string[];
 }
 
+function uniqueEmails(values: Array<string | null | undefined>) {
+  return Array.from(new Set(values.filter(Boolean) as string[]));
+}
+
+function isAutomatedEmail(email?: string | null) {
+  if (!email) return true;
+  const [local, domain = ""] = email.toLowerCase().split("@");
+  if (!local || !domain) return true;
+  if (["no-reply", "noreply", "donotreply", "do-not-reply", "notifications", "notification", "mailer-daemon", "postmaster"].includes(local)) {
+    return true;
+  }
+  return /bounce|newsletter|digest|updates|alerts|marketing|promo|support|billing|receipt|invoice/.test(local);
+}
+
 function gmailThreadUrl(threadId: string) {
   return `https://mail.google.com/mail/u/0/#all/${threadId}`;
 }
@@ -53,7 +68,12 @@ function rawEmail(input: { to: string; subject: string; body: string; threadId?:
   return base64Url(lines.join("\r\n"));
 }
 
-export async function syncGmail(prisma: PrismaClient, userId: string, query = "newer_than:365d") {
+export async function syncGmail(
+  prisma: PrismaClient,
+  userId: string,
+  query = "newer_than:365d",
+  options: { pageToken?: string | null; maxResults?: number } = {},
+) {
   const integration = await getConnectedIntegration(prisma, userId, IntegrationService.GMAIL);
   await prisma.integration.update({
     where: { id: integration.id },
@@ -64,7 +84,8 @@ export async function syncGmail(prisma: PrismaClient, userId: string, query = "n
   try {
     const listUrl = new URL("https://gmail.googleapis.com/gmail/v1/users/me/messages");
     listUrl.searchParams.set("q", query);
-    listUrl.searchParams.set("maxResults", "50");
+    listUrl.searchParams.set("maxResults", String(options.maxResults ?? 25));
+    if (options.pageToken) listUrl.searchParams.set("pageToken", options.pageToken);
     const list = await googleFetch<GmailListResponse>(prisma, userId, IntegrationService.GMAIL, listUrl.toString());
 
     for (const item of list.messages ?? []) {
@@ -78,7 +99,16 @@ export async function syncGmail(prisma: PrismaClient, userId: string, query = "n
 
       const fromEmail = emailFromHeader(header(message, "From"));
       const toEmails = emailsFromHeader(header(message, "To"));
-      const contactEmail = fromEmail && fromEmail !== integration.accountEmail?.toLowerCase() ? fromEmail : toEmails[0];
+      const ccEmails = emailsFromHeader(header(message, "Cc"));
+      const ownEmail = integration.accountEmail?.toLowerCase();
+      const participants = uniqueEmails([fromEmail, ...toEmails, ...ccEmails]);
+      const externalParticipants = participants.filter((email) => email !== ownEmail && !isAutomatedEmail(email));
+      const contactEmail = externalParticipants[0] ?? null;
+      const direction = fromEmail === ownEmail ? "sent" : "received";
+      const existingMessage = await prisma.gmailMessage.findFirst({
+        where: { providerMessageId: message.id, thread: { userId } },
+        select: { id: true },
+      });
       let contactId: string | undefined;
       if (contactEmail) {
         const contact = await prisma.contact.upsert({
@@ -95,11 +125,36 @@ export async function syncGmail(prisma: PrismaClient, userId: string, query = "n
             lastInteractionAt: message.internalDate ? new Date(Number(message.internalDate)) : new Date(),
           },
           update: {
-            interactionCount: { increment: 1 },
+            interactionCount: existingMessage ? undefined : { increment: 1 },
             lastInteractionAt: message.internalDate ? new Date(Number(message.internalDate)) : new Date(),
           },
         });
         contactId = contact.id;
+        await prisma.contactInteraction.upsert({
+          where: {
+            userId_type_providerId: {
+              userId,
+              type: direction === "sent" ? ContactInteractionType.EMAIL_SENT : ContactInteractionType.EMAIL_RECEIVED,
+              providerId: message.id,
+            },
+          },
+          create: {
+            userId,
+            contactId: contact.id,
+            type: direction === "sent" ? ContactInteractionType.EMAIL_SENT : ContactInteractionType.EMAIL_RECEIVED,
+            providerId: message.id,
+            occurredAt: message.internalDate ? new Date(Number(message.internalDate)) : new Date(),
+            metadata: {
+              threadId: message.threadId,
+              subject: header(message, "Subject") ?? null,
+              snippet: message.snippet ?? null,
+            } as Prisma.InputJsonObject,
+          },
+          update: {
+            contactId: contact.id,
+            occurredAt: message.internalDate ? new Date(Number(message.internalDate)) : new Date(),
+          },
+        });
         await prisma.relationshipEdge.upsert({
           where: {
             userId_fromNodeId_toNodeId_relationship_source: {
@@ -131,6 +186,7 @@ export async function syncGmail(prisma: PrismaClient, userId: string, query = "n
             sourceRecordId: message.id,
           },
         });
+        await recalculateRelationshipStrength(prisma, userId, contact.id);
       }
 
       const thread = await prisma.gmailThread.upsert({
@@ -141,6 +197,8 @@ export async function syncGmail(prisma: PrismaClient, userId: string, query = "n
           providerThreadId: message.threadId,
           subject: header(message, "Subject") ?? null,
           snippet: message.snippet ?? null,
+          participantEmails: participants,
+          hasUserReply: direction === "sent",
           threadUrl: gmailThreadUrl(message.threadId),
           labels: message.labelIds ?? [],
           messageCount: 1,
@@ -150,8 +208,10 @@ export async function syncGmail(prisma: PrismaClient, userId: string, query = "n
           contactId,
           subject: header(message, "Subject") ?? undefined,
           snippet: message.snippet ?? undefined,
+          participantEmails: participants,
+          hasUserReply: direction === "sent" ? true : undefined,
           labels: message.labelIds ?? [],
-          messageCount: { increment: 1 },
+          messageCount: existingMessage ? undefined : { increment: 1 },
           lastMessageAt: message.internalDate ? new Date(Number(message.internalDate)) : undefined,
         },
       });
@@ -161,10 +221,10 @@ export async function syncGmail(prisma: PrismaClient, userId: string, query = "n
         create: {
           threadId: thread.id,
           providerMessageId: message.id,
-          direction: fromEmail === integration.accountEmail?.toLowerCase() ? "sent" : "received",
+          direction,
           fromEmail,
           toEmails,
-          ccEmails: emailsFromHeader(header(message, "Cc")),
+          ccEmails,
           subject: header(message, "Subject") ?? null,
           snippet: message.snippet ?? null,
           internalDate: message.internalDate ? new Date(Number(message.internalDate)) : null,
@@ -180,7 +240,13 @@ export async function syncGmail(prisma: PrismaClient, userId: string, query = "n
 
     await prisma.integration.update({
       where: { id: integration.id },
-      data: { syncStatus: "idle", lastSyncedAt: new Date(), lastError: null },
+      data: {
+        syncStatus: list.nextPageToken ? "queued" : "idle",
+        syncCursor: list.nextPageToken ? ({ pageToken: list.nextPageToken, query } as Prisma.InputJsonObject) : Prisma.JsonNull,
+        recordsProcessed: { increment: imported },
+        lastSyncedAt: list.nextPageToken ? integration.lastSyncedAt : new Date(),
+        lastError: null,
+      },
     });
     await audit(prisma, {
       userId,
@@ -188,9 +254,9 @@ export async function syncGmail(prisma: PrismaClient, userId: string, query = "n
       action: "Email conversation indexed",
       outcome: "completed",
       dataSource: "Gmail",
-      details: `${imported} Gmail messages processed as metadata and snippets.`,
+      details: `${imported} Gmail messages processed as metadata and snippets.${list.nextPageToken ? " More pages remain." : ""}`,
     });
-    return { imported };
+    return { imported, nextPageToken: list.nextPageToken ?? null, done: !list.nextPageToken };
   } catch (error) {
     await prisma.integration.update({
       where: { id: integration.id },

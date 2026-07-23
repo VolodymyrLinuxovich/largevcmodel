@@ -35,7 +35,8 @@ export function redirectUri(request?: Request) {
 
 export function createGoogleAuthRedirect(request: Request, service: GoogleOAuthService) {
   const clientId = process.env.GOOGLE_CLIENT_ID;
-  if (!clientId) {
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  if (!clientId || !clientSecret) {
     return NextResponse.redirect(new URL("/settings?error=google_oauth_not_configured", request.url));
   }
 
@@ -48,7 +49,7 @@ export function createGoogleAuthRedirect(request: Request, service: GoogleOAuthS
   url.searchParams.set("state", state);
   url.searchParams.set("access_type", "offline");
   url.searchParams.set("include_granted_scopes", "true");
-  url.searchParams.set("prompt", service === "signin" ? "select_account" : "consent");
+  url.searchParams.set("prompt", "consent");
 
   const response = NextResponse.redirect(url);
   setOAuthStateCookie(response, token);
@@ -115,6 +116,6 @@ export async function fetchGoogleUserInfo(accessToken: string): Promise<GoogleUs
   return (await response.json()) as GoogleUserInfo;
 }
 
-export function sessionFromGoogleUser(user: GoogleUserInfo, userId: string): Omit<SessionPayload, "iat"> {
+export function sessionFromGoogleUser(user: GoogleUserInfo, userId: string): SessionPayload {
   return { userId, email: user.email, name: user.name };
 }

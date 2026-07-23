@@ -13,13 +13,15 @@ import {
   SignInPanel,
   Timestamp,
 } from "@/components/workspace/core";
+import { SyncJobRunner } from "@/components/workspace/sync-job-runner";
 import { getWorkspaceData, integrationConnected, outreachStatusLabel, type MetricValue } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
 
-export default async function OverviewPage() {
+export default async function OverviewPage({ searchParams }: { searchParams?: Promise<{ sync?: string }> }) {
   const data = await getWorkspaceData();
   if (!data.user) return <SignInPanel data={data} />;
+  const { sync } = searchParams ? await searchParams : {};
 
   const contactsConnected = integrationConnected(data, IntegrationService.GOOGLE_CONTACTS) || integrationConnected(data, IntegrationService.GMAIL);
   const gmailConnected = integrationConnected(data, IntegrationService.GMAIL);
@@ -55,6 +57,7 @@ export default async function OverviewPage() {
 
       <Section eyebrow="CONFIGURATION / ONBOARDING" title="Workspace setup status">
         <IntegrationStatusPanel data={data} />
+        <SyncJobRunner enabled={sync === "started" || data.syncJobs.some((job) => job.status === "PENDING" || job.status === "RUNNING")} />
       </Section>
 
       <Section eyebrow="CONTACTS / NETWORK" title="Live network overview">

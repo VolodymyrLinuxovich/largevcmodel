@@ -1,8 +1,9 @@
 import "server-only";
 
-import { ContactSource, IntegrationService, PrismaClient } from "@prisma/client";
+import { ContactInteractionType, ContactSource, IntegrationService, Prisma, PrismaClient } from "@prisma/client";
 import { googleFetch, getConnectedIntegration } from "./api";
 import { audit } from "@/lib/audit";
+import { recalculateRelationshipStrength } from "@/lib/domain/relationships";
 
 type PeopleConnectionsResponse = {
   connections?: Array<{
@@ -24,21 +25,26 @@ function lowerEmail(email?: string | null) {
   return email?.trim().toLowerCase() || null;
 }
 
-export async function syncGoogleContacts(prisma: PrismaClient, userId: string) {
+export async function syncGoogleContacts(
+  prisma: PrismaClient,
+  userId: string,
+  options: { pageToken?: string | null; pageSize?: number; maxPages?: number } = {},
+) {
   const integration = await getConnectedIntegration(prisma, userId, IntegrationService.GOOGLE_CONTACTS);
   await prisma.integration.update({
     where: { id: integration.id },
     data: { syncStatus: "syncing", lastError: null },
   });
 
-  let pageToken: string | undefined;
+  let pageToken: string | undefined = options.pageToken ?? undefined;
   let imported = 0;
+  let pages = 0;
 
   try {
     do {
       const url = new URL("https://people.googleapis.com/v1/people/me/connections");
       url.searchParams.set("personFields", "names,emailAddresses,phoneNumbers,organizations,photos,biographies,memberships,metadata");
-      url.searchParams.set("pageSize", "200");
+      url.searchParams.set("pageSize", String(options.pageSize ?? 100));
       if (pageToken) url.searchParams.set("pageToken", pageToken);
 
       const payload = await googleFetch<PeopleConnectionsResponse>(
@@ -105,6 +111,31 @@ export async function syncGoogleContacts(prisma: PrismaClient, userId: string) {
             metadata: person.metadata as object,
           },
         });
+        if (providerId) {
+          await prisma.contactInteraction.upsert({
+            where: {
+              userId_type_providerId: {
+                userId,
+                type: ContactInteractionType.CONTACT_IMPORTED,
+                providerId,
+              },
+            },
+            create: {
+              userId,
+              contactId: contact.id,
+              type: ContactInteractionType.CONTACT_IMPORTED,
+              providerId,
+              occurredAt: new Date(),
+              metadata: { source: "Google Contacts" } as Prisma.InputJsonObject,
+            },
+            update: {
+              contactId: contact.id,
+              occurredAt: new Date(),
+              metadata: { source: "Google Contacts" } as Prisma.InputJsonObject,
+            },
+          });
+        }
+
         await prisma.relationshipEdge.upsert({
           where: {
             userId_fromNodeId_toNodeId_relationship_source: {
@@ -135,15 +166,25 @@ export async function syncGoogleContacts(prisma: PrismaClient, userId: string) {
             sourceRecordId: providerId,
           },
         });
+        await recalculateRelationshipStrength(prisma, userId, contact.id);
         imported += 1;
       }
 
       pageToken = payload.nextPageToken;
-    } while (pageToken);
+      pages += 1;
+    } while (pageToken && pages < (options.maxPages ?? 1));
+
+    const done = !pageToken;
 
     await prisma.integration.update({
       where: { id: integration.id },
-      data: { syncStatus: "idle", lastSyncedAt: new Date(), lastError: null },
+      data: {
+        syncStatus: done ? "idle" : "queued",
+        syncCursor: done ? Prisma.JsonNull : ({ pageToken } as Prisma.InputJsonObject),
+        recordsProcessed: { increment: imported },
+        lastSyncedAt: done ? new Date() : integration.lastSyncedAt,
+        lastError: null,
+      },
     });
     await audit(prisma, {
       userId,
@@ -151,9 +192,9 @@ export async function syncGoogleContacts(prisma: PrismaClient, userId: string) {
       action: "Contact imported",
       outcome: "completed",
       dataSource: "Google Contacts",
-      details: `${imported} contact records processed from People API.`,
+      details: `${imported} contact records processed from People API.${done ? "" : " More pages remain."}`,
     });
-    return { imported };
+    return { imported, nextPageToken: pageToken ?? null, done };
   } catch (error) {
     await prisma.integration.update({
       where: { id: integration.id },

@@ -158,7 +158,13 @@ export function IntegrationStatusPanel({ data }: { data: WorkspaceData }) {
       label: "Google sign-in",
       status: data.user ? "connected" : data.configuration.googleOAuthConfigured ? "configured" : "not configured",
       detail: data.user?.email ?? "OAuth client controls authentication and workspace ownership.",
-      action: data.user ? <Badge variant="success">signed in</Badge> : <Button asChild variant="outline" size="sm"><Link href="/api/auth/google/start?service=signin">Sign in</Link></Button>,
+      action: data.user ? (
+        <Badge variant="success">signed in</Badge>
+      ) : data.configuration.googleOAuthConfigured ? (
+        <Button asChild variant="outline" size="sm"><Link href="/api/auth/google/start?service=signin">Sign in</Link></Button>
+      ) : (
+        <Badge variant="warning">configuration required</Badge>
+      ),
     },
     {
       label: "Database",
@@ -203,16 +209,23 @@ export function IntegrationStatusPanel({ data }: { data: WorkspaceData }) {
               </p>
               {integration ? (
                 <p className="mt-2 font-mono text-[0.66rem] uppercase tracking-[0.12em] text-muted-foreground">
-                  {integration.accountEmail ?? "account unavailable"} / sync {integration.syncStatus} / scopes {integration.scopes.length} / last{" "}
+                  {integration.accountEmail ?? "account unavailable"} / sync {integration.syncStatus} / records{" "}
+                  {integration.recordsProcessed} / scopes {integration.scopes.length} / last{" "}
                   {integration.lastSyncedAt ? formatDate(integration.lastSyncedAt) : "not synced"}
                 </p>
               ) : null}
               {integration?.lastError ? <p className="mt-2 text-xs leading-5 text-[hsl(39_32%_70%)]">{integration.lastError}</p> : null}
             </div>
             <div className="flex flex-wrap gap-2 lg:justify-end">
-              <Button asChild variant={connected ? "outline" : "default"} size="sm">
-                <Link href={row.href}>{connected ? "Reconnect" : "Connect"}</Link>
-              </Button>
+              {data.configuration.googleOAuthConfigured ? (
+                <Button asChild variant={connected ? "outline" : "default"} size="sm">
+                  <Link href={row.href}>{connected ? "Reconnect" : "Connect"}</Link>
+                </Button>
+              ) : (
+                <Button variant="outline" size="sm" disabled>
+                  Connect
+                </Button>
+              )}
               {connected ? (
                 <ApiActionButton
                   endpoint={`/api/sync/google/${

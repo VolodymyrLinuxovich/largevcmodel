@@ -13,9 +13,10 @@ LargeVCModel is now structured as a user-scoped, integration-first product. It d
 
 The Prisma schema uses PostgreSQL and models:
 
-- `User`, `Partner`
+- `User`, `Partner`, `Session`
 - `Integration`
 - `Contact`, `Company`
+- `ContactInteraction`, `SyncJob`
 - `GmailThread`, `GmailMessage`
 - `CalendarEvent`, `CalendarSlot`, `Meeting`
 - `InvestmentThesis`

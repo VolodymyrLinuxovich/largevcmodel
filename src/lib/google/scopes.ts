@@ -16,8 +16,12 @@ export const GOOGLE_SERVICE_SCOPES = {
 export type GoogleConnectService = keyof typeof GOOGLE_SERVICE_SCOPES;
 export type GoogleOAuthService = GoogleConnectService | "signin";
 
+export function allGoogleWorkspaceScopes() {
+  return Array.from(new Set([...GOOGLE_SIGN_IN_SCOPES, ...Object.values(GOOGLE_SERVICE_SCOPES).flat()]));
+}
+
 export function scopesForService(service: GoogleOAuthService) {
-  if (service === "signin") return GOOGLE_SIGN_IN_SCOPES;
+  if (service === "signin") return allGoogleWorkspaceScopes();
   return Array.from(new Set([...GOOGLE_SIGN_IN_SCOPES, ...GOOGLE_SERVICE_SCOPES[service]]));
 }
 

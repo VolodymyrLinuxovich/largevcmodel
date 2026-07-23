@@ -78,6 +78,16 @@ export type WorkspaceData = {
     dataSource: string | null;
     timestamp: Date;
   }>;
+  syncJobs: Array<{
+    id: string;
+    provider: string;
+    status: string;
+    recordsProcessed: number;
+    startedAt: Date | null;
+    completedAt: Date | null;
+    errorMessage: string | null;
+    createdAt: Date;
+  }>;
 };
 
 function researchConfigured() {
@@ -97,6 +107,8 @@ async function loadIntegrations(userId: string) {
       accountEmail: true,
       scopes: true,
       syncStatus: true,
+      recordsProcessed: true,
+      syncCursor: true,
       lastSyncedAt: true,
       lastError: true,
       disconnectedAt: true,
@@ -139,6 +151,7 @@ export async function getWorkspaceData(): Promise<WorkspaceData> {
     upcomingMeetings: [],
     outreachStatus: [],
     auditEvents: [],
+    syncJobs: [],
   };
 
   if (!session) return base;
@@ -168,6 +181,7 @@ export async function getWorkspaceData(): Promise<WorkspaceData> {
       researchRuns,
       outreachDrafts,
       auditEvents,
+      syncJobs,
     ] = await Promise.all([
       contactsConnected ? prisma.contact.count({ where: { userId: user.id } }) : Promise.resolve(null),
       gmailConnected ? prisma.gmailThread.count({ where: { userId: user.id } }) : Promise.resolve(null),
@@ -217,6 +231,11 @@ export async function getWorkspaceData(): Promise<WorkspaceData> {
         where: { userId: user.id },
         orderBy: { timestamp: "desc" },
         take: 8,
+      }),
+      prisma.syncJob.findMany({
+        where: { userId: user.id },
+        orderBy: { createdAt: "desc" },
+        take: 12,
       }),
     ]);
 
@@ -308,6 +327,16 @@ export async function getWorkspaceData(): Promise<WorkspaceData> {
         actor: event.actor,
         dataSource: event.dataSource,
         timestamp: event.timestamp,
+      })),
+      syncJobs: syncJobs.map((job) => ({
+        id: job.id,
+        provider: job.provider,
+        status: job.status,
+        recordsProcessed: job.recordsProcessed,
+        startedAt: job.startedAt,
+        completedAt: job.completedAt,
+        errorMessage: job.errorMessage,
+        createdAt: job.createdAt,
       })),
     };
   } catch (error) {
