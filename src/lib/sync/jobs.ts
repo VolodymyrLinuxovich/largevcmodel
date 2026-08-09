@@ -89,20 +89,28 @@ export async function queueInitialGoogleSyncJobs(
   return jobs;
 }
 
-async function processJob(prisma: PrismaClient, jobId: string) {
-  const job = await prisma.syncJob.findUnique({ where: { id: jobId } });
-  if (!job || job.status === SyncJobStatus.COMPLETED) return null;
-
-  const service = providerToService[job.provider];
-  await prisma.syncJob.update({
-    where: { id: job.id },
+export async function claimSyncJob(
+  prisma: PrismaClient,
+  job: { id: string; status: SyncJobStatus; startedAt: Date | null },
+) {
+  if (job.status !== SyncJobStatus.PENDING && job.status !== SyncJobStatus.FAILED) return false;
+  const claimed = await prisma.syncJob.updateMany({
+    where: { id: job.id, status: job.status },
     data: {
       status: SyncJobStatus.RUNNING,
       startedAt: job.startedAt ?? new Date(),
+      completedAt: null,
       errorMessage: null,
     },
   });
+  return claimed.count === 1;
+}
 
+async function processJob(prisma: PrismaClient, jobId: string) {
+  const job = await prisma.syncJob.findUnique({ where: { id: jobId } });
+  if (!job || !(await claimSyncJob(prisma, job))) return null;
+
+  const service = providerToService[job.provider];
   await audit(prisma, {
     userId: job.userId,
     actor: "Sync worker",

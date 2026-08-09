@@ -62,9 +62,7 @@ export async function GET(request: Request) {
     });
 
     const integrationService = serviceToIntegration(statePayload.service);
-    const integrationServices = integrationService
-      ? [integrationService]
-      : [IntegrationService.GOOGLE_CONTACTS, IntegrationService.GMAIL, IntegrationService.GOOGLE_CALENDAR];
+    const integrationServices = integrationService ? [integrationService] : [];
     const tokenScopes = tokens.scope?.split(" ").filter(Boolean) ?? [];
 
     for (const service of integrationServices) {
@@ -114,11 +112,13 @@ export async function GET(request: Request) {
       });
     }
 
-    await queueInitialGoogleSyncJobs(prisma, {
-      userId: user.id,
-      actor: user.email,
-      services: integrationServices,
-    });
+    if (integrationServices.length) {
+      await queueInitialGoogleSyncJobs(prisma, {
+        userId: user.id,
+        actor: user.email,
+        services: integrationServices,
+      });
+    }
 
     await audit(prisma, {
       userId: user.id,
@@ -127,7 +127,9 @@ export async function GET(request: Request) {
       action: "User signed in",
       outcome: "completed",
       dataSource: "Google OAuth",
-      details: "Session created and initial Google sync jobs queued.",
+      details: integrationServices.length
+        ? "Session created and the selected Google integration sync was queued."
+        : "Session created with Google identity scopes only.",
     });
 
     const response = NextResponse.redirect(new URL("/overview?sync=started", request.url));

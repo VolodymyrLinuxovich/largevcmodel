@@ -5,27 +5,36 @@ import { badRequest, ok, serverError } from "@/lib/api/respond";
 import { createGoogleCalendarEvent } from "@/lib/google/calendar";
 import { prisma } from "@/lib/prisma";
 
-const requestSchema = z.object({
-  contactId: z.string().min(1).optional(),
-  summary: z.string().min(2).max(160),
-  description: z.string().max(2000).optional(),
-  attendees: z.array(z.string().email()).min(1),
-  startsAt: z.string().datetime(),
-  endsAt: z.string().datetime(),
-  createMeetLink: z.boolean().default(true),
-  confirmCreate: z.literal(true),
-});
+export const calendarBookingSchema = z
+  .object({
+    contactId: z.string().min(1).optional(),
+    summary: z.string().min(2).max(160),
+    description: z.string().max(2000).optional(),
+    attendees: z.array(z.string().email()).min(1),
+    startsAt: z.string().datetime(),
+    endsAt: z.string().datetime(),
+    createMeetLink: z.boolean().default(true),
+    confirmCreate: z.literal(true),
+  })
+  .refine((value) => new Date(value.endsAt) > new Date(value.startsAt), {
+    message: "The event end time must be after its start time.",
+    path: ["endsAt"],
+  });
 
 export async function POST(request: Request) {
   try {
     const user = await requireCurrentUser();
-    const parsed = requestSchema.safeParse(await request.json());
+    const parsed = calendarBookingSchema.safeParse(await request.json());
     if (!parsed.success) return badRequest("Explicit calendar confirmation is required", parsed.error.flatten());
+    const contact = parsed.data.contactId
+      ? await prisma.contact.findFirst({ where: { id: parsed.data.contactId, userId: user.id }, select: { id: true } })
+      : null;
+    if (parsed.data.contactId && !contact) return badRequest("Contact not found.");
     const event = await createGoogleCalendarEvent(prisma, user.id, parsed.data);
     const stored = await prisma.calendarEvent.create({
       data: {
         userId: user.id,
-        contactId: parsed.data.contactId,
+        contactId: contact?.id,
         providerEventId: event.id,
         calendarId: "primary",
         title: parsed.data.summary,
@@ -44,7 +53,7 @@ export async function POST(request: Request) {
       actorType: "USER",
       action: "Calendar event created",
       outcome: "completed",
-      affectedContactId: parsed.data.contactId,
+      affectedContactId: contact?.id,
       dataSource: "Google Calendar",
       details: "User explicitly confirmed calendar event creation.",
     });

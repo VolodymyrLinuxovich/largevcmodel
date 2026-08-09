@@ -151,10 +151,10 @@ export default async function PublicProfilePage({ params }: { params: Promise<{ 
             </div>
             <p className="mt-6 text-sm leading-7 text-muted-foreground">{profile.bio ?? "No public bio has been added."}</p>
             <div className="mt-6 flex flex-wrap gap-2">
-              {profile.websiteUrl ? <TrackedLink profileUserId={profile.userId} type="website" href={profile.websiteUrl} label="Website" /> : null}
-              {socialLinks.linkedin ? <TrackedLink profileUserId={profile.userId} type="linkedin" href={socialLinks.linkedin} label="LinkedIn" /> : null}
-              {socialLinks.github ? <TrackedLink profileUserId={profile.userId} type="github" href={socialLinks.github} label="GitHub" /> : null}
-              {socialLinks.x ? <TrackedLink profileUserId={profile.userId} type="x" href={socialLinks.x} label="X" /> : null}
+              {profile.websiteUrl ? <TrackedLink profileUserId={profile.userId} type="website" label="Website" /> : null}
+              {socialLinks.linkedin ? <TrackedLink profileUserId={profile.userId} type="linkedin" label="LinkedIn" /> : null}
+              {socialLinks.github ? <TrackedLink profileUserId={profile.userId} type="github" label="GitHub" /> : null}
+              {socialLinks.x ? <TrackedLink profileUserId={profile.userId} type="x" label="X" /> : null}
             </div>
           </div>
           <div className="border-y border-border py-6">
@@ -189,9 +189,9 @@ export default async function PublicProfilePage({ params }: { params: Promise<{ 
               ) : null}
             </div>
             <div className="space-y-2 xl:text-right">
-              {featuredProduct.websiteUrl ? <TrackedLink profileUserId={profile.userId} type="product_website" href={featuredProduct.websiteUrl} label="View product" /> : null}
-              {featuredProduct.demoUrl ? <TrackedLink profileUserId={profile.userId} type="product_demo" href={featuredProduct.demoUrl} label="Demo" /> : null}
-              {featuredProduct.repositoryUrl ? <TrackedLink profileUserId={profile.userId} type="repository" href={featuredProduct.repositoryUrl} label="Repository" /> : null}
+              {featuredProduct.websiteUrl ? <TrackedLink profileUserId={profile.userId} type="product_website" label="View product" /> : null}
+              {featuredProduct.demoUrl ? <TrackedLink profileUserId={profile.userId} type="product_demo" label="Demo" /> : null}
+              {featuredProduct.repositoryUrl ? <TrackedLink profileUserId={profile.userId} type="repository" label="Repository" /> : null}
             </div>
           </div>
         ) : (
@@ -374,8 +374,8 @@ function Tabs({ isOwner }: { isOwner: boolean }) {
   );
 }
 
-function TrackedLink({ profileUserId, type, href, label }: { profileUserId: string; type: string; href: string; label: string }) {
-  const target = `/api/profile/link-click?profileUserId=${encodeURIComponent(profileUserId)}&linkType=${encodeURIComponent(type)}&targetUrl=${encodeURIComponent(href)}`;
+function TrackedLink({ profileUserId, type, label }: { profileUserId: string; type: string; label: string }) {
+  const target = `/api/profile/link-click?profileUserId=${encodeURIComponent(profileUserId)}&linkType=${encodeURIComponent(type)}`;
   return (
     <Button asChild variant="outline" size="sm">
       <a href={target} target="_blank" rel="noreferrer">{label}</a>

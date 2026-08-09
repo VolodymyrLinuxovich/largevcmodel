@@ -196,9 +196,9 @@ export async function runPitchDeckExtraction(prisma: PrismaClient, userId: strin
   }
 }
 
-export async function mergePitchDeckExtraction(prisma: PrismaClient, userId: string, input: ExtractionMergeInput) {
+export async function mergePitchDeckExtraction(prisma: PrismaClient, userId: string, startupId: string, input: ExtractionMergeInput) {
   const extraction = await prisma.pitchDeckExtraction.findFirst({
-    where: { id: input.extractionId, userId },
+    where: { id: input.extractionId, userId, startupId },
     include: { fields: true, startup: true, pitchDeck: true },
   });
   if (!extraction) throw new Error("Pitch deck extraction not found.");

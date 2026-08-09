@@ -21,7 +21,7 @@ export function allGoogleWorkspaceScopes() {
 }
 
 export function scopesForService(service: GoogleOAuthService) {
-  if (service === "signin") return allGoogleWorkspaceScopes();
+  if (service === "signin") return [...GOOGLE_SIGN_IN_SCOPES];
   return Array.from(new Set([...GOOGLE_SIGN_IN_SCOPES, ...GOOGLE_SERVICE_SCOPES[service]]));
 }
 

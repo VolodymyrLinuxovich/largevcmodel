@@ -4,6 +4,7 @@ import { audit } from "@/lib/audit";
 import { requireCurrentUser } from "@/lib/auth/current-user";
 import { prisma } from "@/lib/prisma";
 import { revokeIntegration } from "@/lib/google/api";
+import { deleteImportedDataForIntegration } from "@/lib/google/disconnect";
 
 const payloadSchema = z.object({
   deleteImportedData: z.boolean().default(false),
@@ -21,9 +22,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     await revokeIntegration(prisma, user.id, id);
 
     if (parsed.deleteImportedData) {
-      await prisma.contact.deleteMany({ where: { userId: user.id, sourceIntegrationId: id } });
-      await prisma.gmailThread.deleteMany({ where: { userId: user.id } });
-      await prisma.calendarEvent.deleteMany({ where: { userId: user.id } });
+      await deleteImportedDataForIntegration(prisma, user.id, integration);
     }
 
     await audit(prisma, {
