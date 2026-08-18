@@ -10,8 +10,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ sta
     const { startupId } = await params;
     const body = extractionMergeSchema.safeParse(await request.json());
     if (!body.success) return badRequest("Invalid extraction merge request", body.error.flatten());
-    const startup = await mergePitchDeckExtraction(prisma, user.id, body.data);
-    if (startup.id !== startupId) return badRequest("Extraction does not belong to this startup.");
+    const startup = await mergePitchDeckExtraction(prisma, user.id, startupId, body.data);
     await audit(prisma, {
       userId: user.id,
       actor: user.email,

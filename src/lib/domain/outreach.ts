@@ -1,3 +1,5 @@
+import type { OutreachStatus } from "@prisma/client";
+
 type OutreachContact = {
   fullName: string | null;
   primaryEmail: string | null;
@@ -20,6 +22,10 @@ type OutreachOptions = {
   goal?: string;
   senderName?: string | null;
 };
+
+export function canApproveOutreachDraft(status: OutreachStatus) {
+  return status === "AI_GENERATED";
+}
 
 function displayName(contact: OutreachContact) {
   return contact.fullName || contact.primaryEmail || "there";
