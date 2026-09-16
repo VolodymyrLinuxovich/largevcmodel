@@ -1,8 +1,15 @@
 # LargeVCModel
 
-LargeVCModel is an AI-native operating system for venture-capital relationship intelligence. It connects a partner's real Google workspace data, research providers, investment thesis, outreach workflow, meeting workflow, and audit history into one secure application.
+LargeVCModel is a Next.js and PostgreSQL application for investors to search contacts and email history, research companies and people, score opportunities against an investment thesis, and prepare outreach. It connects Gmail, Google Contacts, Google Calendar, research providers, and an audit trail in one application.
 
 The current product is not pre-populated. It does not ship contacts, companies, meetings, replies, sources, or fabricated research. If no account is connected, the app shows integration empty states. If an account is connected and no records match, it shows an honest no-results state.
+
+## Demo Walkthrough
+
+1. Sign in with Google, then connect Gmail, Google Contacts, and Google Calendar independently from Settings.
+2. Search connected relationship data or research a company or person; results retain source and availability context.
+3. Score a company or contact against a saved investment thesis and inspect the criterion-level breakdown.
+4. Generate an evidence-limited outreach draft, approve it, save it to Gmail Drafts, and send only after a second explicit confirmation.
 
 ## Product Overview
 
