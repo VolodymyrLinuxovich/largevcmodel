@@ -4,6 +4,8 @@ LargeVCModel is a Next.js and PostgreSQL application for investors to search con
 
 The current product is not pre-populated. It does not ship contacts, companies, meetings, replies, sources, or fabricated research. If no account is connected, the app shows integration empty states. If an account is connected and no records match, it shows an honest no-results state.
 
+![LargeVCModel research workspace showing the investor search interface](docs/images/largevcmodel-overview.png)
+
 ## Demo Walkthrough
 
 1. Sign in with Google, then connect Gmail, Google Contacts, and Google Calendar independently from Settings.
