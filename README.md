@@ -22,7 +22,7 @@ LargeVCModel helps investors:
 - discover relevant founders, operators, experts, and investors from connected relationship data;
 - search existing Gmail and Google Contacts records;
 - identify warm introduction paths only when there is supporting evidence;
-- research real people and companies through Hermes or another provider adapter;
+- research real people and companies through configured provider adapters;
 - score opportunities against a saved investment thesis;
 - generate evidence-limited outreach drafts;
 - save approved messages to Gmail Drafts;
@@ -51,7 +51,8 @@ Core server modules:
 src/lib/auth          session cookies and current-user resolution
 src/lib/security      AES-GCM token encryption
 src/lib/google        OAuth, refresh, revocation, Gmail, People, Calendar adapters
-src/lib/research      Hermes provider interface
+src/lib/research      company and founder research provider interface
+src/lib/people        external people discovery providers and ranking pipeline
 src/lib/domain        scoring, source canonicalization, research persistence, outreach generation
 src/lib/workspace     user-scoped dashboard data
 src/app/api           authenticated route handlers
@@ -106,6 +107,9 @@ RESEARCH_PROVIDER=none
 HERMES_API_URL=
 HERMES_API_KEY=
 HERMES_COMMAND=hermes
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-4o-mini
+OPENAI_WEB_SEARCH_TOOL=
 ```
 
 Secrets must remain server-side. Do not expose OAuth client secrets, access tokens, refresh tokens, research API keys, or database credentials to the browser.
@@ -180,6 +184,18 @@ HERMES_COMMAND=hermes
 ```
 
 If Hermes is not configured or fails, research runs are marked unavailable and an audit event is recorded. The application does not substitute fabricated provider results.
+
+### OpenAI People Discovery
+
+OpenAI can be used for external people discovery. Set:
+
+```env
+RESEARCH_PROVIDER=openai
+OPENAI_API_KEY=your-api-key
+OPENAI_MODEL=gpt-4o-mini
+```
+
+`OPENAI_WEB_SEARCH_TOOL` is optional. Leave it blank to try `web_search_preview` first and fall back to `web_search`. This adapter is used by the people-search pipeline; company and founder research continues to use the separate research-provider interface described above.
 
 ## Source And Citation Design
 
