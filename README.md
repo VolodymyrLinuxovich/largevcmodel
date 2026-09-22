@@ -60,6 +60,14 @@ src/app/api           authenticated route handlers
 
 ## Local Setup
 
+Prerequisites:
+
+- Node.js 22 and npm (matching the CI environment);
+- a running PostgreSQL database and connection string;
+- a Google OAuth 2.0 web client when testing sign-in or Google integrations.
+
+Copy the environment template before generating the Prisma client:
+
 ```bash
 npm install
 cp .env.example .env
