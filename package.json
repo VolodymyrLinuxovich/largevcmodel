@@ -8,6 +8,7 @@
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "eval:retrieval": "node --import tsx scripts/evaluate-retrieval.ts",
     "db:generate": "DATABASE_URL=${DATABASE_URL:-postgresql://largevcmodel:largevcmodel@localhost:5432/largevcmodel} prisma generate",
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",

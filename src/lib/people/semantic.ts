@@ -56,6 +56,38 @@ export function fullTextScore(query: string, document: string) {
   return matched / q.size;
 }
 
+export type RetrievalCandidate = {
+  id: string;
+  text: string;
+};
+
+export type RankedRetrievalCandidate = RetrievalCandidate & {
+  score: number;
+  semanticScore: number;
+  lexicalScore: number;
+};
+
+/**
+ * Scores the same hybrid signal used by the people-search ranking pipeline.
+ * Keeping this primitive pure makes retrieval quality reproducible without a
+ * provider account or database connection.
+ */
+export function retrievalScore(query: string, document: string) {
+  const semanticScore = semanticSimilarity(query, document);
+  const lexicalScore = fullTextScore(query, document);
+  return {
+    semanticScore,
+    lexicalScore,
+    score: Math.max(semanticScore, lexicalScore),
+  };
+}
+
+export function rankRetrievalCandidates(query: string, candidates: RetrievalCandidate[]): RankedRetrievalCandidate[] {
+  return candidates
+    .map((candidate) => ({ ...candidate, ...retrievalScore(query, candidate.text) }))
+    .sort((left, right) => right.score - left.score || right.semanticScore - left.semanticScore || left.id.localeCompare(right.id));
+}
+
 export function tokenize(text: string) {
   return text
     .toLowerCase()

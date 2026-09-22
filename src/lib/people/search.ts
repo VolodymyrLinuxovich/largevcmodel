@@ -17,7 +17,7 @@ import { getConfiguredPeopleDiscoveryProvider, getPeopleDiscoveryProviderStatus 
 import { interpretPeopleSearchObjective } from "./query";
 import { enrichPersonRelationship } from "./relationship";
 import { calculatePeopleFitScore, type PeopleFitScore } from "./scoring";
-import { embedTextLocally, fullTextScore, semanticSimilarity } from "./semantic";
+import { embedTextLocally, retrievalScore, semanticSimilarity } from "./semantic";
 import { persistProviderOrganization, persistProviderPerson, personSearchText } from "./normalization";
 import { expandGeographyTerms, expandIndustryTerms, expandStageTerms, isInvestmentPersonType, matchesAnyExpanded } from "./search-taxonomy";
 import {
@@ -620,10 +620,9 @@ function emptyReasons(providerMessage: string, diagnostics: PeopleSearchDiagnost
 function combinedRelevance(query: string, startup: StartupProfile, person: DiscoveredPerson, fit: PeopleFitScore) {
   const document = person.searchText || personSearchText(person);
   const startupText = startupSnapshot(startup);
-  const semantic = semanticSimilarity(query, document) * 100;
-  const fullText = fullTextScore(query, document) * 100;
+  const queryRelevance = retrievalScore(query, document).score * 100;
   const startupSimilarity = semanticSimilarity(JSON.stringify(startupText), document) * 100;
-  return Math.round(Math.max(fullText, semantic) * 0.45 + startupSimilarity * 0.2 + fit.overall * 0.35);
+  return Math.round(queryRelevance * 0.45 + startupSimilarity * 0.2 + fit.overall * 0.35);
 }
 
 function sortValue(item: { fit: PeopleFitScore; relationship: PersonRelationshipEnrichment; person: DiscoveredPerson; relevance: number }, interpreted: InterpretedPeopleCriteria) {

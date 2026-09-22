@@ -1,5 +1,7 @@
 # LargeVCModel
 
+[![CI](https://github.com/VolodymyrLinuxovich/largevcmodel/actions/workflows/ci.yml/badge.svg)](https://github.com/VolodymyrLinuxovich/largevcmodel/actions/workflows/ci.yml)
+
 LargeVCModel is a Next.js and PostgreSQL application for investors to search contacts and email history, research companies and people, score opportunities against an investment thesis, and prepare outreach. It connects Gmail, Google Contacts, Google Calendar, research providers, and an audit trail in one application.
 
 The current product is not pre-populated. It does not ship contacts, companies, meetings, replies, sources, or fabricated research. If no account is connected, the app shows integration empty states. If an account is connected and no records match, it shows an honest no-results state.
@@ -258,8 +260,10 @@ POST /api/integrations/:id/disconnect
 ## Testing
 
 ```bash
+npm run lint
 npm run typecheck
 npm run test
+npm run eval:retrieval
 npm run build
 ```
 
@@ -269,7 +273,10 @@ Current unit coverage includes:
 - URL canonicalization and source deduplication;
 - citation mapping;
 - rejection of local source URLs;
-- reply classification.
+- reply classification;
+- semantic retrieval regression metrics over a deterministic 120-profile synthetic corpus.
+
+The retrieval benchmark currently reports Recall@5 of 1.00, MRR of 0.95, and nDCG@5 of 0.9631. See [Semantic Search Evaluation](docs/semantic-search-evaluation.md) for the methodology, reproducibility instructions, and limitations. The benchmark corpus is synthetic and is not presented as production usage data.
 
 ## Known Limitations
 
