@@ -217,6 +217,7 @@ class PostgresProfileRepository:
 def indexed_profile(
     request: ProfileUpsertRequest,
     *,
+    user_id: str,
     embedding: list[float],
     embedding_model: str,
     source_content_hash: str,
@@ -224,6 +225,7 @@ def indexed_profile(
     return IndexedProfile(
         profile=StoredProfile(
             **request.model_dump(),
+            user_id=user_id,
             embedding_model=embedding_model,
             source_content_hash=source_content_hash,
         ),

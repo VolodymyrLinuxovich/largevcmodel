@@ -9,7 +9,7 @@ This service exposes the LargeVCModel profile retrieval pipeline as a typed Fast
 - `POST /v1/search` performs cosine-similarity ranking with optional role, funding-stage, and region filters.
 - Interactive OpenAPI documentation is available at `/docs` while the service is running.
 
-Every query requires a `user_id`, and both repository implementations enforce that scope. Set `RETRIEVAL_SERVICE_TOKEN` to require a bearer token on write and search endpoints.
+Every write and query requires `X-Authenticated-User`, which should be injected by the already-authenticated upstream application. The request body cannot choose a tenant. When PostgreSQL is configured, `RETRIEVAL_SERVICE_TOKEN` is mandatory and callers must also send `Authorization: Bearer ...` for service-to-service authentication. Anonymous requests are only available in explicit in-memory development mode.
 
 ## Run Locally
 
@@ -21,6 +21,8 @@ uvicorn retrieval_api.app:app --reload --app-dir services/retrieval_api
 ```
 
 Without configuration, the service uses an in-memory repository and deterministic 256-dimensional local embeddings. That mode is intended for development, tests, and API exploration.
+
+To run the in-memory API while developing locally, set `RETRIEVAL_ALLOW_ANONYMOUS_DEV=true`; requests still need an `X-Authenticated-User` header so tenant scope is exercised.
 
 ## PostgreSQL And pgvector
 

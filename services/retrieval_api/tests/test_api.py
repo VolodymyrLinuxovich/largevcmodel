@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from retrieval_api.app import create_app
@@ -9,7 +10,7 @@ from retrieval_api.repository import InMemoryProfileRepository
 def build_client(*, service_token: str | None = None) -> TestClient:
     return TestClient(
         create_app(
-            settings=Settings(service_token=service_token),
+            settings=Settings(service_token=service_token, allow_anonymous_dev=service_token is None),
             repository=InMemoryProfileRepository(),
             embedder=LocalHashEmbeddingProvider(),
         )
@@ -19,7 +20,6 @@ def build_client(*, service_token: str | None = None) -> TestClient:
 def profile(
     profile_id: str,
     *,
-    user_id: str = "user-1",
     full_name: str,
     role: str,
     summary: str,
@@ -28,7 +28,6 @@ def profile(
 ) -> dict[str, object]:
     return {
         "id": profile_id,
-        "user_id": user_id,
         "full_name": full_name,
         "role": role,
         "funding_stage": funding_stage,
@@ -55,19 +54,25 @@ def test_ingests_and_ranks_profiles_with_user_scoping() -> None:
             ),
             profile(
                 "private-profile",
-                user_id="user-2",
                 full_name="Private Candidate",
                 role="investor",
                 summary="Defense autonomy and dual-use robotics venture investor.",
             ),
         ]
-        for candidate in candidates:
-            response = client.put("/v1/profiles", json=candidate)
+        for candidate in candidates[:2]:
+            response = client.put("/v1/profiles", json=candidate, headers={"X-Authenticated-User": "user-1"})
             assert response.status_code == 200
+        response = client.put(
+            "/v1/profiles",
+            json=candidates[2],
+            headers={"X-Authenticated-User": "user-2"},
+        )
+        assert response.status_code == 200
 
         response = client.post(
             "/v1/search",
-            json={"user_id": "user-1", "query": "dual-use autonomous defense venture partner", "limit": 5},
+            json={"query": "dual-use autonomous defense venture partner", "limit": 5},
+            headers={"X-Authenticated-User": "user-1"},
         )
 
         assert response.status_code == 200
@@ -87,6 +92,7 @@ def test_applies_structured_filters() -> None:
                 role="investor",
                 summary="Climate technology and carbon markets.",
             ),
+            headers={"X-Authenticated-User": "user-1"},
         )
         client.put(
             "/v1/profiles",
@@ -96,11 +102,13 @@ def test_applies_structured_filters() -> None:
                 role="founder",
                 summary="Climate technology and carbon markets.",
             ),
+            headers={"X-Authenticated-User": "user-1"},
         )
 
         response = client.post(
             "/v1/search",
-            json={"user_id": "user-1", "query": "climate technology", "role": "founder"},
+            json={"query": "climate technology", "role": "founder"},
+            headers={"X-Authenticated-User": "user-1"},
         )
 
         assert response.status_code == 200
@@ -112,23 +120,62 @@ def test_upsert_replaces_existing_profile_without_duplication() -> None:
         first = profile("candidate", full_name="Old Name", role="operator", summary="Autonomy operator.")
         updated = {**first, "full_name": "Updated Name", "summary": "Geospatial autonomy operator."}
 
-        assert client.put("/v1/profiles", json=first).status_code == 200
-        assert client.put("/v1/profiles", json=updated).status_code == 200
+        headers = {"X-Authenticated-User": "user-1"}
+        assert client.put("/v1/profiles", json=first, headers=headers).status_code == 200
+        assert client.put("/v1/profiles", json=updated, headers=headers).status_code == 200
 
         health = client.get("/health").json()
-        response = client.post("/v1/search", json={"user_id": "user-1", "query": "geospatial operator"})
+        response = client.post("/v1/search", json={"query": "geospatial operator"}, headers=headers)
 
         assert health["profile_count"] == 1
         assert response.json()["results"][0]["profile"]["full_name"] == "Updated Name"
 
 
-def test_optional_bearer_authentication() -> None:
+def test_service_and_user_authentication() -> None:
     with build_client(service_token="secret") as client:
         payload = profile("candidate", full_name="Candidate", role="advisor", summary="Fundraising advisor.")
 
+        user_headers = {"X-Authenticated-User": "user-1"}
+        assert client.put("/v1/profiles", json=payload, headers=user_headers).status_code == 401
+        assert client.put(
+            "/v1/profiles",
+            json=payload,
+            headers={**user_headers, "Authorization": "Bearer wrong"},
+        ).status_code == 401
+        assert client.put(
+            "/v1/profiles",
+            json=payload,
+            headers={**user_headers, "Authorization": "Bearer secret"},
+        ).status_code == 200
+
+
+def test_requires_user_context_even_in_anonymous_development_mode() -> None:
+    with build_client() as client:
+        payload = profile("candidate", full_name="Candidate", role="advisor", summary="Fundraising advisor.")
+
         assert client.put("/v1/profiles", json=payload).status_code == 401
-        assert client.put("/v1/profiles", json=payload, headers={"Authorization": "Bearer wrong"}).status_code == 401
-        assert client.put("/v1/profiles", json=payload, headers={"Authorization": "Bearer secret"}).status_code == 200
+
+
+def test_rejects_tenant_selection_in_request_body() -> None:
+    with build_client() as client:
+        payload = profile("candidate", full_name="Candidate", role="advisor", summary="Fundraising advisor.")
+        payload["user_id"] = "attacker-selected-user"
+
+        response = client.put(
+            "/v1/profiles",
+            json=payload,
+            headers={"X-Authenticated-User": "trusted-user"},
+        )
+
+        assert response.status_code == 422
+
+
+def test_rejects_database_mode_without_service_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RETRIEVAL_DATABASE_URL", "postgresql://localhost/retrieval")
+    monkeypatch.delenv("RETRIEVAL_SERVICE_TOKEN", raising=False)
+
+    with pytest.raises(ValueError, match="RETRIEVAL_SERVICE_TOKEN"):
+        Settings.from_env()
 
 
 def test_rejects_unknown_fields() -> None:
@@ -136,6 +183,6 @@ def test_rejects_unknown_fields() -> None:
         payload = profile("candidate", full_name="Candidate", role="advisor", summary="Fundraising advisor.")
         payload["unsupported"] = "value"
 
-        response = client.put("/v1/profiles", json=payload)
+        response = client.put("/v1/profiles", json=payload, headers={"X-Authenticated-User": "user-1"})
 
         assert response.status_code == 422

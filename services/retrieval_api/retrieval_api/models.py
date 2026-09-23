@@ -11,7 +11,6 @@ class ProfileUpsertRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     id: str = Field(min_length=1, max_length=128)
-    user_id: str = Field(min_length=1, max_length=128)
     full_name: str = Field(min_length=1, max_length=200)
     role: ProfileRole
     funding_stage: str | None = Field(default=None, max_length=80)
@@ -45,7 +44,6 @@ class StoredProfile(BaseModel):
 class SearchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
-    user_id: str = Field(min_length=1, max_length=128)
     query: str = Field(min_length=2, max_length=2_000)
     limit: int = Field(default=10, ge=1, le=50)
     role: ProfileRole | None = None

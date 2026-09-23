@@ -44,15 +44,39 @@ def create_app(
         lifespan=lifespan,
     )
 
-    async def authorize(authorization: str | None = Header(default=None)) -> None:
+    def validate_service_token(authorization: str | None) -> None:
         expected = service_settings.service_token
-        if not expected:
+        if not expected and service_settings.allow_anonymous_dev:
             return
         supplied = authorization.removeprefix("Bearer ") if authorization else ""
+        if not expected:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Service authentication is not configured.",
+            )
         if not secrets.compare_digest(supplied, expected):
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid service token.")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid service token.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
-    @application.get("/health", response_model=HealthResponse)
+    async def authorize_service(authorization: str | None = Header(default=None)) -> None:
+        validate_service_token(authorization)
+
+    async def require_principal(
+        authorization: str | None = Header(default=None),
+        authenticated_user: str | None = Header(default=None, alias="X-Authenticated-User"),
+    ) -> str:
+        validate_service_token(authorization)
+        if not authenticated_user or not authenticated_user.strip():
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authenticated user context is required.",
+            )
+        return authenticated_user.strip()
+
+    @application.get("/health", response_model=HealthResponse, dependencies=[Depends(authorize_service)])
     async def health() -> HealthResponse:
         return HealthResponse(
             repository=service_repository.kind,
@@ -63,13 +87,13 @@ def create_app(
     @application.put(
         "/v1/profiles",
         response_model=StoredProfile,
-        dependencies=[Depends(authorize)],
     )
-    async def upsert_profile(request: ProfileUpsertRequest) -> StoredProfile:
+    async def upsert_profile(request: ProfileUpsertRequest, user_id: str = Depends(require_principal)) -> StoredProfile:
         content = request.search_text()
         embedding = await service_embedder.embed(content)
         stored = indexed_profile(
             request,
+            user_id=user_id,
             embedding=embedding,
             embedding_model=service_embedder.model,
             source_content_hash=hashlib.sha256(content.encode("utf-8")).hexdigest(),
@@ -79,12 +103,11 @@ def create_app(
     @application.post(
         "/v1/search",
         response_model=SearchResponse,
-        dependencies=[Depends(authorize)],
     )
-    async def search(request: SearchRequest) -> SearchResponse:
+    async def search(request: SearchRequest, user_id: str = Depends(require_principal)) -> SearchResponse:
         query_embedding = await service_embedder.embed(request.query)
         matches = await service_repository.search(
-            user_id=request.user_id,
+            user_id=user_id,
             embedding=query_embedding,
             filters=SearchFilters(
                 role=request.role,
