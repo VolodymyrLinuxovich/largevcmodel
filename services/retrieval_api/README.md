@@ -59,7 +59,16 @@ The service validates the returned vector dimensions before persistence. Secrets
 
 ```bash
 ruff check services/retrieval_api
-pytest services/retrieval_api/tests
+pytest services/retrieval_api/tests -m "not integration"
 ```
 
-Tests cover deterministic embeddings, semantic ranking, structured filters, tenant isolation, idempotent upserts, request validation, and optional bearer authentication. PostgreSQL integration requires a database with pgvector and is intentionally separate from the credential-free CI suite.
+Tests cover deterministic embeddings, semantic ranking, structured filters, tenant isolation, idempotent upserts, request validation, and optional bearer authentication. The PostgreSQL integration suite applies the migration and exercises the real pgvector repository against tenant filters and updates:
+
+```bash
+RETRIEVAL_ENV=production \
+RETRIEVAL_DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/largevcmodel \
+RETRIEVAL_SERVICE_TOKEN=local-test-token \
+pytest services/retrieval_api/tests/test_postgres_repository.py -m integration
+```
+
+GitHub Actions runs that suite against a PostgreSQL service container with pgvector.

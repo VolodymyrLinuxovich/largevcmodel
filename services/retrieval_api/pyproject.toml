@@ -28,6 +28,9 @@ include = ["retrieval_api*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+  "integration: requires PostgreSQL with the pgvector extension",
+]
 
 [tool.ruff]
 line-length = 120

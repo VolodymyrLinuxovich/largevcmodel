@@ -60,7 +60,7 @@ src/app/api           authenticated route handlers
 services/retrieval_api Python FastAPI ingestion and vector-search service
 ```
 
-The optional [Python Semantic Retrieval API](services/retrieval_api/README.md) provides typed profile ingestion and search endpoints, deterministic local embeddings for development, an OpenAI-compatible learned-embedding adapter, and PostgreSQL/pgvector persistence with HNSW cosine search.
+The optional [Python Semantic Retrieval API](services/retrieval_api/README.md) provides typed profile ingestion and search endpoints, deterministic local embeddings for development, an OpenAI-compatible learned-embedding adapter, and PostgreSQL/pgvector persistence with HNSW cosine search. Its CI coverage includes a PostgreSQL service-container integration suite for the migration and repository path.
 
 ## Local Setup
 
