@@ -1,3 +1,6 @@
+import hashlib
+import hmac
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -10,11 +13,19 @@ from retrieval_api.repository import InMemoryProfileRepository
 def build_client(*, service_token: str | None = None) -> TestClient:
     return TestClient(
         create_app(
-            settings=Settings(service_token=service_token, allow_anonymous_dev=service_token is None),
+            settings=Settings(
+                service_token=service_token,
+                identity_signing_secret="identity-secret" if service_token else None,
+                allow_anonymous_dev=service_token is None,
+            ),
             repository=InMemoryProfileRepository(),
             embedder=LocalHashEmbeddingProvider(),
         )
     )
+
+
+def sign_user(user_id: str) -> str:
+    return hmac.new(b"identity-secret", user_id.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
 def profile(
@@ -146,7 +157,28 @@ def test_service_and_user_authentication() -> None:
             "/v1/profiles",
             json=payload,
             headers={**user_headers, "Authorization": "Bearer secret"},
+        ).status_code == 401
+        assert client.put(
+            "/v1/profiles",
+            json=payload,
+            headers={
+                **user_headers,
+                "Authorization": "Bearer secret",
+                "X-Authenticated-User-Signature": sign_user("user-1"),
+            },
         ).status_code == 200
+
+
+def test_rejects_forged_user_context() -> None:
+    with build_client(service_token="secret") as client:
+        payload = profile("candidate", full_name="Candidate", role="advisor", summary="Fundraising advisor.")
+        headers = {
+            "Authorization": "Bearer secret",
+            "X-Authenticated-User": "attacker-selected-user",
+            "X-Authenticated-User-Signature": sign_user("trusted-user"),
+        }
+
+        assert client.put("/v1/profiles", json=payload, headers=headers).status_code == 401
 
 
 def test_requires_user_context_even_in_anonymous_development_mode() -> None:
@@ -175,6 +207,15 @@ def test_rejects_database_mode_without_service_token(monkeypatch: pytest.MonkeyP
     monkeypatch.delenv("RETRIEVAL_SERVICE_TOKEN", raising=False)
 
     with pytest.raises(ValueError, match="RETRIEVAL_SERVICE_TOKEN"):
+        Settings.from_env()
+
+
+def test_rejects_database_mode_without_identity_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RETRIEVAL_DATABASE_URL", "postgresql://localhost/retrieval")
+    monkeypatch.setenv("RETRIEVAL_SERVICE_TOKEN", "service-secret")
+    monkeypatch.delenv("RETRIEVAL_IDENTITY_SIGNING_SECRET", raising=False)
+
+    with pytest.raises(ValueError, match="RETRIEVAL_IDENTITY_SIGNING_SECRET"):
         Settings.from_env()
 
 

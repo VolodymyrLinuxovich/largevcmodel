@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -67,6 +68,7 @@ def create_app(
     async def require_principal(
         authorization: str | None = Header(default=None),
         authenticated_user: str | None = Header(default=None, alias="X-Authenticated-User"),
+        identity_signature: str | None = Header(default=None, alias="X-Authenticated-User-Signature"),
     ) -> str:
         validate_service_token(authorization)
         if not authenticated_user or not authenticated_user.strip():
@@ -74,7 +76,23 @@ def create_app(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Authenticated user context is required.",
             )
-        return authenticated_user.strip()
+        principal = authenticated_user.strip()
+        identity_secret = service_settings.identity_signing_secret
+        if identity_secret:
+            expected_signature = hmac.new(
+                identity_secret.encode("utf-8"), principal.encode("utf-8"), hashlib.sha256
+            ).hexdigest()
+            if not identity_signature or not hmac.compare_digest(identity_signature, expected_signature):
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid authenticated user context.",
+                )
+        elif not service_settings.allow_anonymous_dev:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Identity authentication is not configured.",
+            )
+        return principal
 
     @application.get("/health", response_model=HealthResponse, dependencies=[Depends(authorize_service)])
     async def health() -> HealthResponse:

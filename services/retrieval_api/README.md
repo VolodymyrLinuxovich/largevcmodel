@@ -9,7 +9,7 @@ This service exposes the LargeVCModel profile retrieval pipeline as a typed Fast
 - `POST /v1/search` performs cosine-similarity ranking with optional role, funding-stage, and region filters.
 - Interactive OpenAPI documentation is available at `/docs` while the service is running.
 
-Every write and query requires `X-Authenticated-User`, which should be injected by the already-authenticated upstream application. The request body cannot choose a tenant. When PostgreSQL is configured, `RETRIEVAL_SERVICE_TOKEN` is mandatory and callers must also send `Authorization: Bearer ...` for service-to-service authentication. Anonymous requests are only available in explicit in-memory development mode.
+Every write and query requires a tenant identity from the already-authenticated upstream application. In database-backed environments, the upstream sends `X-Authenticated-User` together with an HMAC-SHA256 `X-Authenticated-User-Signature` over the exact user ID, using the shared `RETRIEVAL_IDENTITY_SIGNING_SECRET`. The request body cannot choose a tenant, and an unsigned or forged header is rejected. `RETRIEVAL_SERVICE_TOKEN` is also mandatory for service-to-service authentication. Anonymous requests are only available in explicit in-memory development mode.
 
 ## Run Locally
 
@@ -68,6 +68,7 @@ Tests cover deterministic embeddings, semantic ranking, structured filters, tena
 RETRIEVAL_ENV=production \
 RETRIEVAL_DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/largevcmodel \
 RETRIEVAL_SERVICE_TOKEN=local-test-token \
+RETRIEVAL_IDENTITY_SIGNING_SECRET=local-identity-signing-secret \
 pytest services/retrieval_api/tests/test_postgres_repository.py -m integration
 ```
 

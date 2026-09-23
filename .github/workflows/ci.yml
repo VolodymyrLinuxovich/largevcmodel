@@ -91,6 +91,7 @@ jobs:
       RETRIEVAL_ENV: production
       RETRIEVAL_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/retrieval_test
       RETRIEVAL_SERVICE_TOKEN: ci-service-token
+      RETRIEVAL_IDENTITY_SIGNING_SECRET: ci-identity-signing-secret
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
