@@ -128,6 +128,8 @@ def create_app(
 def _build_repository(settings: Settings) -> ProfileRepository:
     if settings.database_url:
         return PostgresProfileRepository(settings.database_url)
+    if settings.environment not in {"development", "test"}:
+        raise ValueError("RETRIEVAL_DATABASE_URL is required outside development and test environments.")
     return InMemoryProfileRepository()
 
 

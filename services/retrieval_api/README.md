@@ -24,6 +24,8 @@ Without configuration, the service uses an in-memory repository and deterministi
 
 To run the in-memory API while developing locally, set `RETRIEVAL_ALLOW_ANONYMOUS_DEV=true`; requests still need an `X-Authenticated-User` header so tenant scope is exercised.
 
+Set `RETRIEVAL_ENV=production` or `RETRIEVAL_ENV=staging` for deployed processes. Those environments refuse to start without `RETRIEVAL_DATABASE_URL`; the service never silently falls back to in-memory storage outside development and test.
+
 ## PostgreSQL And pgvector
 
 Apply the migration to a PostgreSQL database with the pgvector extension:

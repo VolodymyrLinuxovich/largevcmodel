@@ -178,6 +178,20 @@ def test_rejects_database_mode_without_service_token(monkeypatch: pytest.MonkeyP
         Settings.from_env()
 
 
+def test_rejects_production_without_database(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RETRIEVAL_ENV", "production")
+    monkeypatch.delenv("RETRIEVAL_DATABASE_URL", raising=False)
+    monkeypatch.setenv("RETRIEVAL_SERVICE_TOKEN", "service-secret")
+
+    with pytest.raises(ValueError, match="RETRIEVAL_DATABASE_URL"):
+        Settings.from_env()
+
+
+def test_repository_factory_rejects_production_memory_mode() -> None:
+    with pytest.raises(ValueError, match="RETRIEVAL_DATABASE_URL"):
+        create_app(settings=Settings(environment="production", service_token="service-secret"))
+
+
 def test_rejects_unknown_fields() -> None:
     with build_client() as client:
         payload = profile("candidate", full_name="Candidate", role="advisor", summary="Fundraising advisor.")
