@@ -43,6 +43,7 @@ The visual system uses a dark, editorial, institutional interface inspired by de
 - **Auth:** Google OAuth 2.0, signed HTTP-only session cookie
 - **Integrations:** Gmail API, People API, Google Calendar API
 - **Research:** Provider abstraction with Hermes adapter
+- **Semantic retrieval service:** Python, FastAPI, PostgreSQL, pgvector, OpenAI-compatible embeddings
 - **Security:** encrypted OAuth token storage, server-only secrets, user-scoped queries
 
 Core server modules:
@@ -56,7 +57,10 @@ src/lib/people        external people discovery providers and ranking pipeline
 src/lib/domain        scoring, source canonicalization, research persistence, outreach generation
 src/lib/workspace     user-scoped dashboard data
 src/app/api           authenticated route handlers
+services/retrieval_api Python FastAPI ingestion and vector-search service
 ```
+
+The optional [Python Semantic Retrieval API](services/retrieval_api/README.md) provides typed profile ingestion and search endpoints, deterministic local embeddings for development, an OpenAI-compatible learned-embedding adapter, and PostgreSQL/pgvector persistence with HNSW cosine search.
 
 ## Local Setup
 
@@ -299,6 +303,8 @@ Current unit coverage includes:
 - rejection of local source URLs;
 - reply classification;
 - semantic retrieval regression metrics over a deterministic 120-profile synthetic corpus.
+
+Python service coverage includes embedding determinism, semantic ranking, structured filters, tenant isolation, idempotent upserts, request validation, and bearer authentication. GitHub Actions validates the TypeScript application and Python service independently.
 
 The retrieval benchmark currently reports Recall@5 of 1.00, MRR of 0.95, and nDCG@5 of 0.9631. See [Semantic Search Evaluation](docs/semantic-search-evaluation.md) for the methodology, reproducibility instructions, and limitations. The benchmark corpus is synthetic and is not presented as production usage data.
 

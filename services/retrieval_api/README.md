@@ -1,0 +1,61 @@
+# Python Semantic Retrieval API
+
+This service exposes the LargeVCModel profile retrieval pipeline as a typed FastAPI application. It supports profile ingestion, embedding generation, user-scoped vector search, structured filters, and PostgreSQL persistence through pgvector.
+
+## API
+
+- `GET /health` reports repository status, embedding model, and indexed profile count.
+- `PUT /v1/profiles` normalizes and embeds a profile, then idempotently upserts it.
+- `POST /v1/search` performs cosine-similarity ranking with optional role, funding-stage, and region filters.
+- Interactive OpenAPI documentation is available at `/docs` while the service is running.
+
+Every query requires a `user_id`, and both repository implementations enforce that scope. Set `RETRIEVAL_SERVICE_TOKEN` to require a bearer token on write and search endpoints.
+
+## Run Locally
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e 'services/retrieval_api[dev]'
+uvicorn retrieval_api.app:app --reload --app-dir services/retrieval_api
+```
+
+Without configuration, the service uses an in-memory repository and deterministic 256-dimensional local embeddings. That mode is intended for development, tests, and API exploration.
+
+## PostgreSQL And pgvector
+
+Apply the migration to a PostgreSQL database with the pgvector extension:
+
+```bash
+psql "$RETRIEVAL_DATABASE_URL" -f services/retrieval_api/migrations/001_create_retrieval_profiles.sql
+```
+
+Then set:
+
+```env
+RETRIEVAL_DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/largevcmodel
+```
+
+The PostgreSQL repository uses an async connection pool, tenant-scoped queries, idempotent upserts, and an HNSW cosine-distance index.
+
+## Embedding Provider
+
+The local fallback is credential-free and deterministic. For learned embeddings, configure an OpenAI-compatible endpoint:
+
+```env
+RETRIEVAL_EMBEDDING_API_URL=https://api.openai.com/v1
+RETRIEVAL_EMBEDDING_API_KEY=...
+RETRIEVAL_EMBEDDING_MODEL=text-embedding-3-small
+RETRIEVAL_EMBEDDING_DIMENSIONS=256
+```
+
+The service validates the returned vector dimensions before persistence. Secrets stay server-side.
+
+## Test
+
+```bash
+ruff check services/retrieval_api
+pytest services/retrieval_api/tests
+```
+
+Tests cover deterministic embeddings, semantic ranking, structured filters, tenant isolation, idempotent upserts, request validation, and optional bearer authentication. PostgreSQL integration requires a database with pgvector and is intentionally separate from the credential-free CI suite.
