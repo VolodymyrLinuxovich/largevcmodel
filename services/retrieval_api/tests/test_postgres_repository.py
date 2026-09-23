@@ -7,7 +7,7 @@ from psycopg import AsyncConnection
 
 from retrieval_api.embeddings import LocalHashEmbeddingProvider
 from retrieval_api.models import ProfileUpsertRequest
-from retrieval_api.repository import IndexedProfile, PostgresProfileRepository, indexed_profile
+from retrieval_api.repository import IndexedProfile, PostgresProfileRepository, SearchFilters, indexed_profile
 
 pytestmark = pytest.mark.integration
 
@@ -107,7 +107,7 @@ async def test_postgres_search_is_tenant_scoped_and_filterable(postgres_reposito
     results = await postgres_repository.search(
         user_id="user-a",
         embedding=query,
-        filters={"role": "investor"},
+        filters=SearchFilters(role="investor"),
         limit=10,
     )
 
@@ -140,7 +140,7 @@ async def test_postgres_upsert_updates_in_place(postgres_repository: PostgresPro
     await postgres_repository.upsert(updated)
 
     query = await LocalHashEmbeddingProvider().embed("geospatial operator")
-    results = await postgres_repository.search(user_id="user-a", embedding=query, filters={}, limit=10)
+    results = await postgres_repository.search(user_id="user-a", embedding=query, filters=SearchFilters(), limit=10)
 
     assert await postgres_repository.count() == 1
     assert results[0].profile.full_name == "Updated Candidate"
