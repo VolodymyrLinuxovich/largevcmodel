@@ -43,3 +43,15 @@ export function initials(name: string) {
     .join("")
     .toUpperCase();
 }
+
+/** Formats a calendar-day value stored as UTC midnight without shifting it into the viewer's timezone. */
+export function formatDay(input?: string | Date | null) {
+  if (!input) return "Unknown";
+  const date = typeof input === "string" ? new Date(input) : input;
+  return new Intl.DateTimeFormat("en", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }).format(date);
+}
+
+/** A calendar-day deadline is overdue only once that UTC day has fully elapsed. */
+export function isDayOverdue(day: Date, now: Date) {
+  return day.getTime() + 86_400_000 <= now.getTime();
+}

@@ -206,6 +206,50 @@ enum RelationshipHealthState {
   INSUFFICIENT_DATA
 }
 
+enum OpportunityStage {
+  SOURCED
+  SCREENING
+  MEETING
+  DILIGENCE
+  IC
+  INVESTED
+  PASSED
+}
+
+enum OpportunityPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum OpportunitySource {
+  INBOUND
+  WARM_INTRO
+  OUTBOUND
+  RESEARCH
+  EVENT
+  REFERRAL
+  OTHER
+}
+
+enum OpportunityContactRole {
+  FOUNDER
+  EXECUTIVE
+  INTRODUCER
+  CO_INVESTOR
+  ADVISOR
+  OTHER
+}
+
+enum OpportunityEventType {
+  CREATED
+  STAGE_CHANGED
+  UPDATED
+  CONTACT_LINKED
+  CONTACT_UNLINKED
+  SCORE_UPDATED
+}
+
 enum EntityResolutionOutcome {
   EXACT_MATCH
   PROBABLE_MATCH
@@ -273,6 +317,9 @@ model User {
   personEmbeddings          PersonEmbedding[]
   entityResolutionDecisions EntityResolutionDecision[]
   healthSnapshots           RelationshipHealthSnapshot[]
+  opportunities             Opportunity[]
+  opportunityContacts       OpportunityContact[]
+  opportunityEvents         OpportunityEvent[]
 }
 
 model Session {
@@ -343,6 +390,7 @@ model Company {
   claims        ResearchClaim[]
   sources       Source[]
   fitScores     FitScore[]
+  opportunities Opportunity[]
 
   @@unique([userId, name])
   @@index([userId, domain])
@@ -391,6 +439,8 @@ model Contact {
   auditEvents                   AuditEvent[]
   personRelationshipEnrichments PersonRelationshipEnrichment[]
   healthSnapshots               RelationshipHealthSnapshot[]
+  opportunityLinks              OpportunityContact[]
+  introducedOpportunities       Opportunity[]
 
   @@unique([userId, source, providerId])
   @@unique([userId, primaryEmail])
@@ -532,24 +582,25 @@ model CalendarEvent {
 }
 
 model InvestmentThesis {
-  id                     String     @id @default(cuid())
+  id                     String        @id @default(cuid())
   userId                 String
   name                   String
-  targetSectors          String[]   @default([])
-  stages                 String[]   @default([])
-  geographies            String[]   @default([])
+  targetSectors          String[]      @default([])
+  stages                 String[]      @default([])
+  geographies            String[]      @default([])
   checkSizeMin           Int?
   checkSizeMax           Int?
-  businessModels         String[]   @default([])
+  businessModels         String[]      @default([])
   technicalRequirements  String?
   founderCharacteristics String?
   exclusionCriteria      String?
   customCriteria         Json?
-  active                 Boolean    @default(true)
-  createdAt              DateTime   @default(now())
-  updatedAt              DateTime   @updatedAt
-  user                   User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  active                 Boolean       @default(true)
+  createdAt              DateTime      @default(now())
+  updatedAt              DateTime      @updatedAt
+  user                   User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   fitScores              FitScore[]
+  opportunities          Opportunity[]
 
   @@index([userId, active])
 }
@@ -680,8 +731,84 @@ model FitScore {
   company         Company?          @relation(fields: [companyId], references: [id], onDelete: SetNull)
   thesis          InvestmentThesis? @relation(fields: [thesisId], references: [id], onDelete: SetNull)
   researchRun     ResearchRun?      @relation(fields: [researchRunId], references: [id], onDelete: SetNull)
+  opportunities   Opportunity[]
 
   @@index([userId, calculatedAt])
+  @@index([companyId, calculatedAt])
+}
+
+/// A first-class investment opportunity. Company search results are not deals until a user creates one.
+model Opportunity {
+  id                    String               @id @default(cuid())
+  userId                String
+  companyId             String
+  thesisId              String?
+  currentFitScoreId     String?
+  introducedByContactId String?
+  title                 String?
+  stage                 OpportunityStage     @default(SOURCED)
+  priority              OpportunityPriority  @default(MEDIUM)
+  ownerName             String?
+  source                OpportunitySource    @default(OTHER)
+  sourceDetail          String?
+  nextAction            String?
+  nextActionAt          DateTime?
+  notes                 String?
+  passReason            String?
+  /// `${userId}:${companyId}` while the opportunity is open, NULL once closed. The unique
+  /// constraint allows at most one open opportunity per company without a partial index.
+  openCompanyKey        String?              @unique
+  /// Optimistic-concurrency counter; every mutation increments it.
+  version               Int                  @default(1)
+  stageChangedAt        DateTime             @default(now())
+  closedAt              DateTime?
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  user                  User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company               Company              @relation(fields: [companyId], references: [id], onDelete: NoAction)
+  thesis                InvestmentThesis?    @relation(fields: [thesisId], references: [id], onDelete: SetNull)
+  currentFitScore       FitScore?            @relation(fields: [currentFitScoreId], references: [id], onDelete: SetNull)
+  introducedBy          Contact?             @relation(fields: [introducedByContactId], references: [id], onDelete: SetNull)
+  contacts              OpportunityContact[]
+  events                OpportunityEvent[]
+
+  @@index([userId, stage, updatedAt])
+  @@index([userId, nextActionAt])
+  @@index([companyId])
+}
+
+model OpportunityContact {
+  id            String                 @id @default(cuid())
+  userId        String
+  opportunityId String
+  contactId     String
+  role          OpportunityContactRole @default(OTHER)
+  createdAt     DateTime               @default(now())
+  user          User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  opportunity   Opportunity            @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  contact       Contact                @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@unique([opportunityId, contactId])
+  @@index([userId, contactId])
+}
+
+/// Append-only activity and stage history for an opportunity.
+model OpportunityEvent {
+  id            String               @id @default(cuid())
+  userId        String
+  opportunityId String
+  type          OpportunityEventType
+  fromStage     OpportunityStage?
+  toStage       OpportunityStage?
+  actor         String
+  note          String?
+  metadata      Json?
+  createdAt     DateTime             @default(now())
+  user          User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  opportunity   Opportunity          @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+
+  @@index([opportunityId, createdAt])
+  @@index([userId, createdAt])
 }
 
 model OutreachDraft {

@@ -69,10 +69,10 @@ export function calculateFitScore(input: CandidateScoreInput, rawWeights: Scorin
           ? 72
           : 42;
 
-  const relationship = Math.min(
-    100,
-    Math.max(0, (input.relationshipStrength ?? 0) * 10 + Math.min(30, (input.interactionCount ?? 0) * 3)),
-  );
+  // relationshipStrength is persisted on a 0-100 scale (see recalculateRelationshipStrength and
+  // relationship health). It was previously multiplied by 10, which saturated this criterion.
+  const relationshipBase = Math.min(100, Math.max(0, input.relationshipStrength ?? 0));
+  const relationship = Math.min(100, Math.round(relationshipBase * 0.7 + Math.min(30, (input.interactionCount ?? 0) * 3)));
   const evidence = Math.min(100, input.sourceCount * 18 + input.supportedClaimCount * 10);
 
   const criteria = {
