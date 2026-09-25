@@ -8,7 +8,7 @@ const requestSchema = z.object({
   contactId: z.string().min(1),
   notes: z.string().max(4000).optional(),
   tags: z.array(z.string().min(1).max(40)).optional(),
-  relationshipStrength: z.number().min(0).max(10).optional(),
+  relationshipStrength: z.number().int().min(0).max(100).optional(),
 });
 
 export async function POST(request: Request) {

@@ -74,6 +74,7 @@ export type CandidateScoreInput = {
   sector?: string | null;
   stage?: string | null;
   geography?: string | null;
+  /** 0-100 relationship strength or health score. */
   relationshipStrength?: number | null;
   interactionCount?: number | null;
   lastInteractionAt?: string | Date | null;
