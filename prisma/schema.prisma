@@ -320,6 +320,7 @@ model User {
   opportunities             Opportunity[]
   opportunityContacts       OpportunityContact[]
   opportunityEvents         OpportunityEvent[]
+  meetingBriefs             MeetingBrief[]
 }
 
 model Session {
@@ -557,25 +558,26 @@ model GmailMessage {
 }
 
 model CalendarEvent {
-  id              String   @id @default(cuid())
+  id              String         @id @default(cuid())
   userId          String
   contactId       String?
   providerEventId String
-  calendarId      String   @default("primary")
+  calendarId      String         @default("primary")
   title           String?
   description     String?
   location        String?
   htmlLink        String?
   meetingUrl      String?
-  attendees       String[] @default([])
+  attendees       String[]       @default([])
   startsAt        DateTime
   endsAt          DateTime
   status          String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  contact         Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contact         Contact?       @relation(fields: [contactId], references: [id], onDelete: SetNull)
   meeting         Meeting?
+  meetingBriefs   MeetingBrief[]
 
   @@unique([userId, calendarId, providerEventId])
   @@index([userId, startsAt])
@@ -771,6 +773,7 @@ model Opportunity {
   introducedBy          Contact?             @relation(fields: [introducedByContactId], references: [id], onDelete: SetNull)
   contacts              OpportunityContact[]
   events                OpportunityEvent[]
+  meetingBriefs         MeetingBrief[]
 
   @@index([userId, stage, updatedAt])
   @@index([userId, nextActionAt])
@@ -1625,4 +1628,25 @@ model PlatformMessage {
 
   @@index([threadId, createdAt])
   @@index([senderUserId, createdAt])
+}
+
+/// Stored snapshot of an evidence-backed meeting brief. Regenerating creates a new row so earlier
+/// briefs remain reviewable exactly as they were presented.
+model MeetingBrief {
+  id              String         @id @default(cuid())
+  userId          String
+  opportunityId   String
+  calendarEventId String?
+  title           String
+  content         Json
+  version         String
+  claimCount      Int            @default(0)
+  sourceCount     Int            @default(0)
+  generatedAt     DateTime       @default(now())
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  opportunity     Opportunity    @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  calendarEvent   CalendarEvent? @relation(fields: [calendarEventId], references: [id], onDelete: SetNull)
+
+  @@index([userId, generatedAt])
+  @@index([opportunityId, generatedAt])
 }

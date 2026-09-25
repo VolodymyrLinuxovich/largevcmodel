@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { BriefGenerator } from "@/components/briefs/brief-generator";
 import { ContactLinker } from "@/components/pipeline/contact-linker";
 import { enumLabel } from "@/components/pipeline/labels";
 import { OpportunityFieldsForm } from "@/components/pipeline/opportunity-fields-form";
@@ -10,11 +11,12 @@ import { StageChangeForm } from "@/components/pipeline/stage-change-form";
 import { HealthStateBadge } from "@/components/relationships/health-state-badge";
 import { ApiActionButton } from "@/components/workspace/api-action-button";
 import { HeroHeader, PageFrame, Section, SignInPanel } from "@/components/workspace/core";
+import { listMeetingBriefs, upcomingMeetingsForOpportunity } from "@/lib/briefs/service";
 import { getOpportunityDetail } from "@/lib/pipeline/queries";
 import { STAGE_LABELS } from "@/lib/pipeline/stages";
 import { listTheses } from "@/lib/pipeline/thesis";
 import { prisma } from "@/lib/prisma";
-import { formatDate } from "@/lib/utils";
+import { formatDate, formatTime } from "@/lib/utils";
 import { getWorkspaceData } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
@@ -23,7 +25,12 @@ export default async function OpportunityPage({ params }: { params: Promise<{ id
   const data = await getWorkspaceData();
   if (!data.user) return <SignInPanel data={data} />;
   const { id } = await params;
-  const [opportunity, theses] = await Promise.all([getOpportunityDetail(prisma, data.user.id, id), listTheses(prisma, data.user.id)]);
+  const [opportunity, theses, briefs, upcomingMeetings] = await Promise.all([
+    getOpportunityDetail(prisma, data.user.id, id),
+    listTheses(prisma, data.user.id),
+    listMeetingBriefs(prisma, data.user.id, id),
+    upcomingMeetingsForOpportunity(prisma, data.user.id, id),
+  ]);
   if (!opportunity) notFound();
   const { company, currentFitScore: fit } = opportunity;
   const criteria = fit && fit.criteria && typeof fit.criteria === "object" && !Array.isArray(fit.criteria) ? (fit.criteria as Record<string, number>) : null;
@@ -128,6 +135,29 @@ export default async function OpportunityPage({ params }: { params: Promise<{ id
             healthScore: link.contact.healthScore,
           }))}
         />
+      </Section>
+
+      <Section eyebrow="Preparation" title="Meeting briefs">
+        <BriefGenerator
+          opportunityId={opportunity.id}
+          meetings={upcomingMeetings.map((meeting) => ({ id: meeting.id, label: `${meeting.title ?? "Untitled meeting"} / ${formatTime(meeting.startsAt)}` }))}
+        />
+        {briefs.length ? (
+          <ul className="mt-6 divide-y divide-border border-y border-border">
+            {briefs.map((brief) => (
+              <li key={brief.id} className="flex flex-wrap items-center justify-between gap-3 py-3 text-sm">
+                <Link href={`/pipeline/${opportunity.id}/briefs/${brief.id}`} className="underline-offset-4 hover:underline">
+                  {brief.title}
+                </Link>
+                <span className="font-mono text-[0.66rem] uppercase tracking-[0.08em] text-muted-foreground">
+                  {brief.claimCount} claims / {brief.sourceCount} sources / {formatTime(brief.generatedAt)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="mt-6 text-sm text-muted-foreground">No briefs generated yet.</p>
+        )}
       </Section>
 
       <Section eyebrow="Details" title="Next action and notes">
