@@ -3,7 +3,8 @@ import "server-only";
 import { ContactInteractionType, ContactSource, IntegrationService, Prisma, PrismaClient } from "@prisma/client";
 import { googleFetch, getConnectedIntegration } from "./api";
 import { audit } from "@/lib/audit";
-import { recalculateRelationshipStrength } from "@/lib/domain/relationships";
+import { advanceLastInteraction, recalculateRelationshipStrength } from "@/lib/domain/relationships";
+import { refreshRelationshipHealthAfterSync } from "@/lib/domain/relationship-health-sync";
 import { classifyRecord } from "@/lib/domain/network-search";
 
 type GmailListResponse = { messages?: Array<{ id: string; threadId: string }>; nextPageToken?: string };
@@ -87,6 +88,7 @@ export async function syncGmail(
   });
 
   let imported = 0;
+  const touchedContactIds = new Set<string>();
   try {
     const listUrl = new URL("https://gmail.googleapis.com/gmail/v1/users/me/messages");
     listUrl.searchParams.set("q", query);
@@ -116,6 +118,7 @@ export async function syncGmail(
       const externalParticipants = participants.filter((email) => email !== ownEmail && !isAutomatedEmail(email));
       const contactEmail = externalParticipants[0] ?? null;
       const direction = fromEmail === ownEmail ? "sent" : "received";
+      const occurredAt = message.internalDate ? new Date(Number(message.internalDate)) : new Date();
       const existingMessage = await prisma.gmailMessage.findFirst({
         where: { providerMessageId: message.id, thread: { userId } },
         select: { id: true },
@@ -133,14 +136,15 @@ export async function syncGmail(
             emails: [contactEmail],
             fullName: contactEmail,
             interactionCount: 1,
-            lastInteractionAt: message.internalDate ? new Date(Number(message.internalDate)) : new Date(),
+            lastInteractionAt: occurredAt,
           },
           update: {
             interactionCount: existingMessage ? undefined : { increment: 1 },
-            lastInteractionAt: message.internalDate ? new Date(Number(message.internalDate)) : new Date(),
           },
         });
         contactId = contact.id;
+        touchedContactIds.add(contact.id);
+        await advanceLastInteraction(prisma, userId, contact.id, occurredAt);
         await prisma.contactInteraction.upsert({
           where: {
             userId_type_providerId: {
@@ -154,7 +158,7 @@ export async function syncGmail(
             contactId: contact.id,
             type: direction === "sent" ? ContactInteractionType.EMAIL_SENT : ContactInteractionType.EMAIL_RECEIVED,
             providerId: message.id,
-            occurredAt: message.internalDate ? new Date(Number(message.internalDate)) : new Date(),
+            occurredAt,
             metadata: {
               threadId: message.threadId,
               subject: header(message, "Subject") ?? null,
@@ -163,7 +167,7 @@ export async function syncGmail(
           },
           update: {
             contactId: contact.id,
-            occurredAt: message.internalDate ? new Date(Number(message.internalDate)) : new Date(),
+            occurredAt,
           },
         });
         await prisma.relationshipEdge.upsert({
@@ -272,6 +276,8 @@ export async function syncGmail(
       });
       imported += 1;
     }
+
+    await refreshRelationshipHealthAfterSync(prisma, userId, Array.from(touchedContactIds), "Gmail");
 
     await prisma.integration.update({
       where: { id: integration.id },

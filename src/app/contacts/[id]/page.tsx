@@ -5,6 +5,8 @@ import { EmptyState, HeroHeader, PageFrame, Section, SignInPanel, Timestamp } fr
 import { getWorkspaceData } from "@/lib/workspace";
 import { prisma } from "@/lib/prisma";
 import { sourceDomain } from "@/lib/domain/sources";
+import { getContactRelationshipHealth } from "@/lib/domain/relationship-health-service";
+import { RelationshipHealthPanel } from "@/components/relationships/relationship-health-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +26,7 @@ export default async function ContactProfilePage({ params }: { params: Promise<{
     },
   });
   if (!contact) notFound();
+  const health = await getContactRelationshipHealth(prisma, data.user.id, contact.id);
 
   const sourceList = new Map<string, (typeof contact.sources)[number]>();
   contact.sources.forEach((source) => sourceList.set(source.id, source));
@@ -90,6 +93,10 @@ export default async function ContactProfilePage({ params }: { params: Promise<{
           )}
         </div>
       </section>
+
+      <Section eyebrow="RELATIONSHIP HEALTH" title="Observed interaction health">
+        {health ? <RelationshipHealthPanel contactId={contact.id} health={health} /> : null}
+      </Section>
 
       <Section eyebrow="EVIDENCE" title="Claims and sources">
         {contact.claims.length ? (

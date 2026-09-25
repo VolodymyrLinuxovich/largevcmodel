@@ -1,5 +1,6 @@
 import "server-only";
 
+import { AuthenticationRequiredError } from "@/lib/api/errors";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "./session";
 
@@ -20,7 +21,7 @@ export async function getCurrentUser() {
 export async function requireCurrentUser() {
   const user = await getCurrentUser();
   if (!user) {
-    throw new Error("Authentication required");
+    throw new AuthenticationRequiredError();
   }
   return user;
 }

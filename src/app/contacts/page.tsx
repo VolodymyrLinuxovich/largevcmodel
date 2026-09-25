@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { HealthStateBadge } from "@/components/relationships/health-state-badge";
 import { EmptyState, HeroHeader, PageFrame, Section, SignInPanel, Timestamp } from "@/components/workspace/core";
 import { prisma } from "@/lib/prisma";
 import { getWorkspaceData, integrationConnected } from "@/lib/workspace";
@@ -54,6 +55,8 @@ export default async function ContactsPage({
       ? [{ lastInteractionAt: "desc" }, { relationshipStrength: "desc" }]
       : sort === "name"
         ? [{ fullName: "asc" }, { primaryEmail: "asc" }]
+        : sort === "followup"
+          ? [{ nextFollowUpAt: { sort: "asc", nulls: "last" } }, { healthScore: { sort: "desc", nulls: "last" } }]
         : [{ relationshipStrength: "desc" }, { lastInteractionAt: "desc" }];
   const [contacts, totalContacts] = connected
     ? await Promise.all([
@@ -102,6 +105,7 @@ export default async function ContactsPage({
               <option value="relationship">Relationship</option>
               <option value="last">Last interaction</option>
               <option value="name">Name</option>
+              <option value="followup">Follow-up due</option>
             </Select>
             <Button type="submit" variant="outline">Search</Button>
             <label className="flex items-center gap-2 text-xs leading-5 text-muted-foreground md:col-span-full">
@@ -122,7 +126,7 @@ export default async function ContactsPage({
         ) : contacts.length ? (
           <>
             <div className="overflow-x-auto border-y border-border">
-              <table className="w-full min-w-[920px] text-left text-sm">
+              <table className="w-full min-w-[1040px] text-left text-sm">
                 <thead className="border-b border-border font-mono text-[0.68rem] uppercase tracking-[0.08em] text-muted-foreground">
                   <tr>
                     <th className="px-4 py-3">Name</th>
@@ -130,6 +134,7 @@ export default async function ContactsPage({
                     <th className="px-4 py-3">Email</th>
                     <th className="px-4 py-3">Source</th>
                     <th className="px-4 py-3">Relationship</th>
+                    <th className="px-4 py-3">Health</th>
                     <th className="px-4 py-3">Interactions</th>
                     <th className="px-4 py-3">Last interaction</th>
                     <th className="px-4 py-3">Fit</th>
@@ -147,6 +152,9 @@ export default async function ContactsPage({
                       <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{contact.primaryEmail ?? "Unavailable"}</td>
                       <td className="px-4 py-3"><Badge variant="muted">{contact.source.replaceAll("_", " ")}</Badge></td>
                       <td className="px-4 py-3">{contact.relationshipStrength ?? "N/A"}</td>
+                      <td className="px-4 py-3">
+                        <HealthStateBadge state={contact.healthState} score={contact.healthScore} />
+                      </td>
                       <td className="px-4 py-3">{contact.interactionCount}</td>
                       <td className="px-4 py-3"><Timestamp value={contact.lastInteractionAt} /></td>
                       <td className="px-4 py-3">{contact.fitScores[0]?.overall ?? "N/A"}</td>
