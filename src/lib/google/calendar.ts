@@ -3,7 +3,8 @@ import "server-only";
 import { ContactInteractionType, IntegrationService, Prisma, PrismaClient } from "@prisma/client";
 import { googleFetch, getConnectedIntegration } from "./api";
 import { audit } from "@/lib/audit";
-import { recalculateRelationshipStrength } from "@/lib/domain/relationships";
+import { advanceLastInteraction, recalculateRelationshipStrength } from "@/lib/domain/relationships";
+import { refreshRelationshipHealthAfterSync } from "@/lib/domain/relationship-health-sync";
 
 type CalendarEventsResponse = {
   nextPageToken?: string;
@@ -57,6 +58,7 @@ export async function syncGoogleCalendar(
     const payload = await googleFetch<CalendarEventsResponse>(prisma, userId, IntegrationService.GOOGLE_CALENDAR, url.toString());
 
     let imported = 0;
+    const touchedContactIds = new Set<string>();
     for (const event of payload.items ?? []) {
       const startsAt = eventDate(event.start);
       const endsAt = eventDate(event.end);
@@ -104,9 +106,10 @@ export async function syncGoogleCalendar(
           where: { id: matchingContact.id },
           data: {
             interactionCount: existingEvent ? undefined : { increment: 1 },
-            lastInteractionAt: startsAt,
           },
         });
+        touchedContactIds.add(matchingContact.id);
+        await advanceLastInteraction(prisma, userId, matchingContact.id, startsAt);
         await prisma.contactInteraction.upsert({
           where: {
             userId_type_providerId: {
@@ -166,6 +169,8 @@ export async function syncGoogleCalendar(
       }
       imported += 1;
     }
+
+    await refreshRelationshipHealthAfterSync(prisma, userId, Array.from(touchedContactIds), "Google Calendar");
 
     await prisma.integration.update({
       where: { id: integration.id },

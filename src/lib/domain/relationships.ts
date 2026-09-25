@@ -12,6 +12,29 @@ function recencyPoints(lastInteractionAt: Date | null) {
   return 2;
 }
 
+/**
+ * Moves `lastInteractionAt` forward only. Sync pages arrive newest-first and calendar imports
+ * include future events, so an unconditional write would regress or future-date the value.
+ * The conditional update is atomic, so concurrent sync pages cannot move it backwards.
+ */
+export async function advanceLastInteraction(
+  prisma: PrismaClient,
+  userId: string,
+  contactId: string,
+  occurredAt: Date,
+  now = new Date(),
+) {
+  if (occurredAt > now) return;
+  await prisma.contact.updateMany({
+    where: {
+      id: contactId,
+      userId,
+      OR: [{ lastInteractionAt: null }, { lastInteractionAt: { lt: occurredAt } }],
+    },
+    data: { lastInteractionAt: occurredAt },
+  });
+}
+
 export async function recalculateRelationshipStrength(
   prisma: PrismaClient,
   userId: string,

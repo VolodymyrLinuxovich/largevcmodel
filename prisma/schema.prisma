@@ -198,6 +198,14 @@ enum SavedPersonStatus {
   NOT_RELEVANT
 }
 
+enum RelationshipHealthState {
+  STRENGTHENING
+  STABLE
+  COOLING
+  DORMANT
+  INSUFFICIENT_DATA
+}
+
 enum EntityResolutionOutcome {
   EXACT_MATCH
   PROBABLE_MATCH
@@ -264,6 +272,7 @@ model User {
   savedPeople               SavedPerson[]
   personEmbeddings          PersonEmbedding[]
   entityResolutionDecisions EntityResolutionDecision[]
+  healthSnapshots           RelationshipHealthSnapshot[]
 }
 
 model Session {
@@ -360,6 +369,10 @@ model Contact {
   relationshipStrength          Int?
   lastInteractionAt             DateTime?
   interactionCount              Int                            @default(0)
+  healthScore                   Int?
+  healthState                   RelationshipHealthState?
+  healthCalculatedAt            DateTime?
+  nextFollowUpAt                DateTime?
   createdAt                     DateTime                       @default(now())
   updatedAt                     DateTime                       @updatedAt
   user                          User                           @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -377,11 +390,38 @@ model Contact {
   meetings                      Meeting[]
   auditEvents                   AuditEvent[]
   personRelationshipEnrichments PersonRelationshipEnrichment[]
+  healthSnapshots               RelationshipHealthSnapshot[]
 
   @@unique([userId, source, providerId])
   @@unique([userId, primaryEmail])
   @@index([userId, fullName])
   @@index([userId, lastInteractionAt])
+  @@index([userId, healthState])
+  @@index([userId, nextFollowUpAt])
+}
+
+/// Append-only history of relationship-health changes. A snapshot is written only when the
+/// computed state, score, or follow-up date changes, so history stays bounded.
+model RelationshipHealthSnapshot {
+  id                String                   @id @default(cuid())
+  userId            String
+  contactId         String
+  state             RelationshipHealthState
+  score             Int?
+  previousState     RelationshipHealthState?
+  previousScore     Int?
+  lastInteractionAt DateTime?
+  nextFollowUpAt    DateTime?
+  components        Json
+  evidence          Json
+  explanation       String[]                 @default([])
+  algorithmVersion  String
+  calculatedAt      DateTime                 @default(now())
+  user              User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contact           Contact                  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([userId, calculatedAt])
+  @@index([contactId, calculatedAt])
 }
 
 model ContactInteraction {
