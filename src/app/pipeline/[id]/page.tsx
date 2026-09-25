@@ -3,15 +3,18 @@ import { notFound } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { BriefGenerator } from "@/components/briefs/brief-generator";
+import { GenerateMemoButton } from "@/components/memos/memo-actions";
 import { ContactLinker } from "@/components/pipeline/contact-linker";
 import { enumLabel } from "@/components/pipeline/labels";
 import { OpportunityFieldsForm } from "@/components/pipeline/opportunity-fields-form";
 import { OpportunityTimeline } from "@/components/pipeline/opportunity-timeline";
 import { StageChangeForm } from "@/components/pipeline/stage-change-form";
 import { HealthStateBadge } from "@/components/relationships/health-state-badge";
+import { WatchButton } from "@/components/watchlist/watch-button";
 import { ApiActionButton } from "@/components/workspace/api-action-button";
 import { HeroHeader, PageFrame, Section, SignInPanel } from "@/components/workspace/core";
 import { listMeetingBriefs, upcomingMeetingsForOpportunity } from "@/lib/briefs/service";
+import { listInvestmentMemos } from "@/lib/memos/service";
 import { getOpportunityDetail } from "@/lib/pipeline/queries";
 import { STAGE_LABELS } from "@/lib/pipeline/stages";
 import { listTheses } from "@/lib/pipeline/thesis";
@@ -25,11 +28,16 @@ export default async function OpportunityPage({ params }: { params: Promise<{ id
   const data = await getWorkspaceData();
   if (!data.user) return <SignInPanel data={data} />;
   const { id } = await params;
-  const [opportunity, theses, briefs, upcomingMeetings] = await Promise.all([
+  const [opportunity, theses, briefs, upcomingMeetings, memos, watchItems] = await Promise.all([
     getOpportunityDetail(prisma, data.user.id, id),
     listTheses(prisma, data.user.id),
     listMeetingBriefs(prisma, data.user.id, id),
     upcomingMeetingsForOpportunity(prisma, data.user.id, id),
+    listInvestmentMemos(prisma, data.user.id, id),
+    prisma.watchlistItem.findMany({
+      where: { userId: data.user.id, OR: [{ opportunityId: id }, { company: { opportunities: { some: { id } } } }] },
+      select: { id: true, opportunityId: true, companyId: true },
+    }),
   ]);
   if (!opportunity) notFound();
   const { company, currentFitScore: fit } = opportunity;
@@ -42,9 +50,23 @@ export default async function OpportunityPage({ params }: { params: Promise<{ id
         title={company.name}
         body={[opportunity.title, company.sector, company.stage, company.geography].filter(Boolean).join(" / ") || "Company details have not been provided."}
         actions={
-          <Button asChild variant="outline">
-            <Link href="/pipeline">Back to pipeline</Link>
-          </Button>
+          <>
+            <WatchButton
+              entityType="OPPORTUNITY"
+              targetId={opportunity.id}
+              itemId={watchItems.find((item) => item.opportunityId === opportunity.id)?.id ?? null}
+              label="opportunity"
+            />
+            <WatchButton
+              entityType="COMPANY"
+              targetId={company.id}
+              itemId={watchItems.find((item) => item.companyId === company.id)?.id ?? null}
+              label="company"
+            />
+            <Button asChild variant="outline">
+              <Link href="/pipeline">Back to pipeline</Link>
+            </Button>
+          </>
         }
       />
 
@@ -157,6 +179,31 @@ export default async function OpportunityPage({ params }: { params: Promise<{ id
           </ul>
         ) : (
           <p className="mt-6 text-sm text-muted-foreground">No briefs generated yet.</p>
+        )}
+      </Section>
+
+      <Section eyebrow="Investment committee" title="IC memos">
+        <p className="mb-5 max-w-3xl text-sm text-muted-foreground">
+          Memos organize stored evidence for human judgment. They separate connected-account, public-source and user-provided evidence from AI
+          inference and missing information, and never include a recommendation.
+        </p>
+        <GenerateMemoButton opportunityId={opportunity.id} />
+        {memos.length ? (
+          <ul className="mt-6 divide-y divide-border border-y border-border">
+            {memos.map((memo) => (
+              <li key={memo.id} className="flex flex-wrap items-center justify-between gap-3 py-3 text-sm">
+                <Link href={`/pipeline/${opportunity.id}/memos/${memo.id}`} className="underline-offset-4 hover:underline">
+                  {memo.title}
+                </Link>
+                <span className="flex items-center gap-3">
+                  <Badge variant={memo.status === "FINALIZED" ? "success" : "outline"}>{enumLabel(memo.status)}</Badge>
+                  <span className="font-mono text-[0.66rem] uppercase tracking-[0.08em] text-muted-foreground">{formatTime(memo.generatedAt)}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="mt-6 text-sm text-muted-foreground">No memo drafts yet.</p>
         )}
       </Section>
 

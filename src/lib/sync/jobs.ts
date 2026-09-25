@@ -5,6 +5,7 @@ import { audit } from "@/lib/audit";
 import { syncGoogleCalendar } from "@/lib/google/calendar";
 import { syncGoogleContacts } from "@/lib/google/contacts";
 import { syncGmail } from "@/lib/google/gmail";
+import { refreshWatchSignals } from "@/lib/watchlist/service";
 
 const providerToService: Record<SyncProvider, IntegrationService> = {
   GOOGLE_CONTACTS: IntegrationService.GOOGLE_CONTACTS,
@@ -204,6 +205,27 @@ export async function processNextSyncJobs(
   const remaining = await prisma.syncJob.count({
     where: { userId: input.userId, status: SyncJobStatus.PENDING },
   });
+  const processed = results.filter(Boolean).length;
+  if (processed) await refreshWatchSignalsAfterSync(prisma, input.userId);
 
-  return { processed: results.filter(Boolean).length, remaining };
+  return { processed, remaining };
+}
+
+/** Newly synced records can produce watchlist signals. A detector failure is reported, not hidden, but does not fail the sync. */
+async function refreshWatchSignalsAfterSync(prisma: PrismaClient, userId: string) {
+  try {
+    await refreshWatchSignals(prisma, userId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown watchlist failure";
+    console.error("Watchlist signal refresh failed after sync", { userId, message });
+    await audit(prisma, {
+      userId,
+      actor: "Watchlist signal detector",
+      actorType: "SYSTEM",
+      action: "Watchlist signal refresh failed",
+      outcome: "failed",
+      dataSource: "Stored workspace records",
+      details: message,
+    });
+  }
 }

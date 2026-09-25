@@ -11,6 +11,7 @@ const navItems = [
   { href: "/pipeline", label: "Pipeline" },
   { href: "/research", label: "Research" },
   { href: "/contacts", label: "Contacts" },
+  { href: "/watchlist", label: "Watchlist" },
   { href: "/profile", label: "Profile" },
   { href: "/audit", label: "Audit Log" },
 ];
