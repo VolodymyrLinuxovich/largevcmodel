@@ -6,15 +6,16 @@ import { HeroHeader, PageFrame, SignInPanel } from "@/components/workspace/core"
 import { getMeetingBrief } from "@/lib/briefs/service";
 import { prisma } from "@/lib/prisma";
 import { formatTime } from "@/lib/utils";
+import { getCurrentUser } from "@/lib/auth/current-user";
 import { getWorkspaceData } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
 
 export default async function MeetingBriefPage({ params }: { params: Promise<{ id: string; briefId: string }> }) {
-  const data = await getWorkspaceData();
-  if (!data.user) return <SignInPanel data={data} />;
+  const user = await getCurrentUser();
+  if (!user) return <SignInPanel data={await getWorkspaceData()} />;
   const { id, briefId } = await params;
-  const brief = await getMeetingBrief(prisma, data.user.id, briefId);
+  const brief = await getMeetingBrief(prisma, user.id, briefId);
   if (!brief || brief.opportunityId !== id) notFound();
 
   return (

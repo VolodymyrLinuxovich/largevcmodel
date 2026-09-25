@@ -20,28 +20,29 @@ import { STAGE_LABELS } from "@/lib/pipeline/stages";
 import { listTheses } from "@/lib/pipeline/thesis";
 import { prisma } from "@/lib/prisma";
 import { formatDate, formatTime } from "@/lib/utils";
+import { getCurrentUser } from "@/lib/auth/current-user";
 import { getWorkspaceData } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
 
 export default async function OpportunityPage({ params }: { params: Promise<{ id: string }> }) {
-  const data = await getWorkspaceData();
-  if (!data.user) return <SignInPanel data={data} />;
+  const user = await getCurrentUser();
+  if (!user) return <SignInPanel data={await getWorkspaceData()} />;
   const { id } = await params;
   const [opportunity, theses, briefs, upcomingMeetings, memos, watchItems] = await Promise.all([
-    getOpportunityDetail(prisma, data.user.id, id),
-    listTheses(prisma, data.user.id),
-    listMeetingBriefs(prisma, data.user.id, id),
-    upcomingMeetingsForOpportunity(prisma, data.user.id, id),
-    listInvestmentMemos(prisma, data.user.id, id),
+    getOpportunityDetail(prisma, user.id, id),
+    listTheses(prisma, user.id),
+    listMeetingBriefs(prisma, user.id, id),
+    upcomingMeetingsForOpportunity(prisma, user.id, id),
+    listInvestmentMemos(prisma, user.id, id),
     prisma.watchlistItem.findMany({
-      where: { userId: data.user.id, OR: [{ opportunityId: id }, { company: { opportunities: { some: { id } } } }] },
+      where: { userId: user.id, OR: [{ opportunityId: id }, { company: { opportunities: { some: { id } } } }] },
       select: { id: true, opportunityId: true, companyId: true },
     }),
   ]);
   if (!opportunity) notFound();
   const { company, currentFitScore: fit } = opportunity;
-  const criteria = fit && fit.criteria && typeof fit.criteria === "object" && !Array.isArray(fit.criteria) ? (fit.criteria as Record<string, number>) : null;
+  const criteria = fit && fit.criteria && typeof fit.criteria === "object" && !Array.isArray(fit.criteria) ? (fit.criteria as Record<string, number | null>) : null;
 
   return (
     <PageFrame>
@@ -93,7 +94,7 @@ export default async function OpportunityPage({ params }: { params: Promise<{ id
         </div>
         <div className="px-5 py-8 sm:px-8 lg:px-10">
           <p className="eyebrow mb-4">Change stage</p>
-          <StageChangeForm opportunityId={opportunity.id} stage={opportunity.stage} version={opportunity.version} />
+          <StageChangeForm key={opportunity.version} opportunityId={opportunity.id} stage={opportunity.stage} version={opportunity.version} />
         </div>
       </section>
 
@@ -119,7 +120,7 @@ export default async function OpportunityPage({ params }: { params: Promise<{ id
                   {Object.entries(criteria).map(([key, value]) => (
                     <li key={key} className="border border-border px-2 py-1.5">
                       <span className="block text-muted-foreground">{enumLabel(key.replace(/([A-Z])/g, "_$1"))}</span>
-                      <span className="font-mono">{value}</span>
+                      <span className="font-mono">{value ?? "Unavailable"}</span>
                     </li>
                   ))}
                 </ul>
@@ -153,8 +154,8 @@ export default async function OpportunityPage({ params }: { params: Promise<{ id
             name: link.contact.fullName ?? link.contact.primaryEmail ?? "Unnamed contact",
             detail: [link.contact.title, link.contact.organization].filter(Boolean).join(", ") || null,
             role: link.role,
-            healthState: link.contact.healthState,
-            healthScore: link.contact.healthScore,
+            healthState: link.health.healthState,
+            healthScore: link.health.healthScore,
           }))}
         />
       </Section>

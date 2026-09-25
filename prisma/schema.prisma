@@ -518,6 +518,7 @@ model ContactInteraction {
   @@unique([userId, type, providerId])
   @@index([userId, occurredAt])
   @@index([contactId, occurredAt])
+  @@index([contactId, createdAt])
 }
 
 model GmailThread {
@@ -545,6 +546,8 @@ model GmailThread {
 
   @@unique([userId, providerThreadId])
   @@index([userId, lastMessageAt])
+  @@index([userId, contactId, lastMessageAt])
+  @@index([participantEmails], type: Gin)
 }
 
 model SyncJob {
@@ -609,6 +612,8 @@ model CalendarEvent {
 
   @@unique([userId, calendarId, providerEventId])
   @@index([userId, startsAt])
+  @@index([userId, contactId, startsAt])
+  @@index([attendees], type: Gin)
 }
 
 model InvestmentThesis {
@@ -701,6 +706,9 @@ model ResearchClaim {
   sources       ClaimSource[]
 
   @@index([userId, provenance])
+  @@index([userId, companyId, extractedAt])
+  @@index([userId, contactId, extractedAt])
+  @@index([userId, createdAt])
 }
 
 model Source {
@@ -727,6 +735,8 @@ model Source {
 
   @@unique([userId, canonicalUrl])
   @@index([userId, sourceType])
+  @@index([userId, companyId, createdAt])
+  @@index([userId, contactId, createdAt])
 }
 
 model ClaimSource {
@@ -808,6 +818,8 @@ model Opportunity {
   @@index([userId, stage, updatedAt])
   @@index([userId, nextActionAt])
   @@index([companyId])
+  @@index([thesisId])
+  @@index([introducedByContactId])
 }
 
 model OpportunityContact {

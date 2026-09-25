@@ -83,3 +83,34 @@ export async function recalculateRelationshipStrength(
     },
   };
 }
+
+/**
+ * Recomputes Contact.lastInteractionAt and interactionCount from the interactions that remain,
+ * e.g. after imported Gmail or Calendar data is deleted, so no derived value outlives its source.
+ */
+export async function rebuildContactInteractionSummary(prisma: PrismaClient, userId: string, contactIds: string[], now = new Date()) {
+  if (!contactIds.length) return;
+  const remaining = await prisma.contactInteraction.groupBy({
+    by: ["contactId"],
+    where: {
+      userId,
+      contactId: { in: contactIds },
+      type: { in: [ContactInteractionType.EMAIL_SENT, ContactInteractionType.EMAIL_RECEIVED, ContactInteractionType.CALENDAR_MEETING] },
+      occurredAt: { lte: now },
+    },
+    _count: { _all: true },
+    _max: { occurredAt: true },
+  });
+  const byContact = new Map(remaining.map((row) => [row.contactId, row]));
+  await prisma.$transaction(
+    contactIds.map((contactId) =>
+      prisma.contact.updateMany({
+        where: { id: contactId, userId },
+        data: {
+          lastInteractionAt: byContact.get(contactId)?._max.occurredAt ?? null,
+          interactionCount: byContact.get(contactId)?._count._all ?? 0,
+        },
+      }),
+    ),
+  );
+}

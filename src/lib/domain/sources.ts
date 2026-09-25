@@ -3,7 +3,10 @@ import type { ResearchSourceInput } from "./types";
 
 export const sourceInputSchema = z.object({
   title: z.string().min(2),
-  url: z.string().url({ message: "Source URL must be a valid public http(s) URL" }),
+  url: z
+    .string()
+    .url({ message: "Source URL must be a valid public http(s) URL" })
+    .refine((value) => /^https?:\/\//i.test(value), { message: "Source URL must be a valid public http(s) URL" }),
   publisher: z.string().optional().nullable(),
   publishedAt: z.union([z.string(), z.date()]).optional().nullable(),
   accessedAt: z.union([z.string(), z.date()]),

@@ -6,6 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { HealthStateBadge } from "@/components/relationships/health-state-badge";
 import { EmptyState, HeroHeader, PageFrame, Section, SignInPanel, Timestamp } from "@/components/workspace/core";
+import { calculateRelationshipHealth } from "@/lib/domain/relationship-health";
+import { loadHealthInputs } from "@/lib/domain/relationship-health-service";
 import { prisma } from "@/lib/prisma";
 import { getWorkspaceData, integrationConnected } from "@/lib/workspace";
 
@@ -73,6 +75,10 @@ export default async function ContactsPage({
       ])
     : [[], 0];
   const totalPages = Math.max(1, Math.ceil(totalContacts / pageSize));
+  // Stored health drives sorting; the displayed value is recomputed so it never shows a decayed state.
+  const now = new Date();
+  const healthInputs = await loadHealthInputs(prisma, data.user.id, contacts.map((contact) => contact.id), now);
+  const liveHealth = new Map(contacts.map((contact) => [contact.id, calculateRelationshipHealth(healthInputs.get(contact.id)!)]));
 
   return (
     <PageFrame>
@@ -153,7 +159,7 @@ export default async function ContactsPage({
                       <td className="px-4 py-3"><Badge variant="muted">{contact.source.replaceAll("_", " ")}</Badge></td>
                       <td className="px-4 py-3">{contact.relationshipStrength ?? "N/A"}</td>
                       <td className="px-4 py-3">
-                        <HealthStateBadge state={contact.healthState} score={contact.healthScore} />
+                        <HealthStateBadge state={liveHealth.get(contact.id)?.state} score={liveHealth.get(contact.id)?.score} />
                       </td>
                       <td className="px-4 py-3">{contact.interactionCount}</td>
                       <td className="px-4 py-3"><Timestamp value={contact.lastInteractionAt} /></td>

@@ -28,7 +28,13 @@ LargeVCModel helps investors:
 - save approved messages to Gmail Drafts;
 - send only after explicit confirmation;
 - inspect meetings from Google Calendar;
-- preserve sources, claims, scores, and operational audit events.
+- preserve sources, claims, scores, and operational audit events;
+- track relationship health and decay from observed Gmail and Calendar interactions;
+- run a deal pipeline from sourcing to investment committee with auditable stage history;
+- prepare evidence-backed meeting briefs and IC memos that separate facts from generated suggestions;
+- watch companies, people and opportunities for changes derived from stored data.
+
+See [VC Workflows](docs/vc-workflows.md) for the relationship-health algorithm, pipeline rules, evidence classes and signal definitions.
 
 The visual system uses a dark, editorial, institutional interface inspired by defense-technology research products: near-black backgrounds, high-contrast typography, thin dividers, rectangular controls, dense technical metadata, and restrained motion.
 
@@ -96,6 +102,8 @@ Then run:
 npm run db:generate
 npm run db:push
 ```
+
+Existing databases that track `prisma/migrations` can apply the VC workflow migrations (`202609240001` to `202609240005`) with `npx prisma migrate deploy`. The watchlist migration also adds a `CHECK` constraint that `db push` does not create.
 
 The included Prisma seed script is intentionally a no-op for product data:
 
@@ -283,7 +291,26 @@ POST /api/sync/google/contacts
 POST /api/sync/google/gmail
 POST /api/sync/google/calendar
 POST /api/integrations/:id/disconnect
+GET  /api/contacts/:id/health
+POST /api/relationships/health/refresh
+GET  /api/opportunities            POST /api/opportunities
+GET  /api/opportunities/:id        PATCH /api/opportunities/:id
+POST /api/opportunities/:id/stage
+POST /api/opportunities/:id/contacts   DELETE /api/opportunities/:id/contacts
+POST /api/opportunities/:id/score
+GET  /api/opportunities/:id/briefs  POST /api/opportunities/:id/briefs
+GET  /api/briefs/:id
+GET  /api/opportunities/:id/memos   POST /api/opportunities/:id/memos
+GET  /api/memos/:id
+POST /api/memos/:id/finalize
+GET  /api/theses                   POST /api/theses
+GET  /api/watchlist                POST /api/watchlist    DELETE /api/watchlist
+POST /api/watchlist/refresh
+GET  /api/watchlist/signals
+POST /api/watchlist/signals/read
 ```
+
+Request bodies are validated with Zod. Malformed JSON and validation failures return `400`, unauthenticated requests `401`, records owned by another user `404`, stale pipeline versions and duplicate open opportunities `409`, and invalid stage transitions `422`. Database error details are logged server-side and never returned.
 
 ## Testing
 
@@ -291,6 +318,7 @@ POST /api/integrations/:id/disconnect
 npm run lint
 npm run typecheck
 npm run test
+npm run test:integration   # requires TEST_DATABASE_URL (disposable PostgreSQL, schema pushed)
 npm run eval:retrieval
 npm run build
 ```
@@ -302,6 +330,11 @@ Current unit coverage includes:
 - citation mapping;
 - rejection of local source URLs;
 - reply classification;
+- relationship-health scoring, decay over time and insufficient-data handling;
+- opportunity stage transitions, optimistic concurrency and ownership checks;
+- meeting-brief and IC-memo evidence assembly, provenance classes and unsafe-URL handling;
+- watchlist signal derivation and deduplication;
+- route-level validation, authentication and error mapping;
 - semantic retrieval regression metrics over a deterministic 120-profile synthetic corpus.
 
 Python service coverage includes embedding determinism, semantic ranking, structured filters, tenant isolation, idempotent upserts, request validation, and bearer authentication. GitHub Actions validates the TypeScript application and Python service independently.
@@ -309,6 +342,10 @@ Python service coverage includes embedding determinism, semantic ranking, struct
 The retrieval benchmark currently reports Recall@5 of 1.00, MRR of 0.95, and nDCG@5 of 0.9631. See [Semantic Search Evaluation](docs/semantic-search-evaluation.md) for the methodology, reproducibility instructions, and limitations. The benchmark corpus is synthetic and is not presented as production usage data.
 
 ## Known Limitations
+
+- Briefs, memos and watchlist signals use deterministic rules; no language model writes them, and they only reflect data already stored in LargeVCModel.
+- Watchlist signals are detected on demand and after sync passes; there is no background scheduler and no external news monitoring.
+- Network search still interprets `relationshipStrength` on a 0-10 scale while synced strength is stored on 0-100.
 
 - Gmail body handling is intentionally conservative and stores snippets/metadata by default.
 - Relationship edges are stored, but automatic edge extraction from every synced interaction can be expanded.

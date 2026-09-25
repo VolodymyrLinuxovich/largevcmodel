@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { safeExternalUrl } from "@/lib/evidence/safe-url";
 
 type StartupOption = {
   id: string;
@@ -399,7 +400,7 @@ function ResultCard({ result, onSave }: { result: SearchResponse["results"][numb
             <p className="eyebrow mb-3">Sources</p>
             <div className="flex flex-wrap gap-2">
               {result.sources.slice(0, 6).map((source, index) => (
-                <a key={source.id} href={source.url} target="_blank" rel="noreferrer" className="border border-border px-2 py-1 text-xs text-muted-foreground transition-colors hover:border-primary hover:text-foreground">
+                <a key={source.id} href={safeExternalUrl(source.url) ?? undefined} target="_blank" rel="noreferrer" className="border border-border px-2 py-1 text-xs text-muted-foreground transition-colors hover:border-primary hover:text-foreground">
                   [{index + 1}] {source.publisher ?? new URL(source.url).hostname}
                 </a>
               ))}

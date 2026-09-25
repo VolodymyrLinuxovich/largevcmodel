@@ -8,6 +8,7 @@ import { EmptyState, HeroHeader, PageFrame, Section, SignInPanel } from "@/compo
 import { prisma } from "@/lib/prisma";
 import { formatTime } from "@/lib/utils";
 import { listSignals, listWatchlist } from "@/lib/watchlist/service";
+import { getCurrentUser } from "@/lib/auth/current-user";
 import { getWorkspaceData } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
@@ -21,9 +22,9 @@ function describeItem(item: Item): { label: string; href: string | null; targetI
 }
 
 export default async function WatchlistPage() {
-  const data = await getWorkspaceData();
-  if (!data.user) return <SignInPanel data={data} />;
-  const [items, signals] = await Promise.all([listWatchlist(prisma, data.user.id), listSignals(prisma, data.user.id, { limit: 100 })]);
+  const user = await getCurrentUser();
+  if (!user) return <SignInPanel data={await getWorkspaceData()} />;
+  const [items, signals] = await Promise.all([listWatchlist(prisma, user.id), listSignals(prisma, user.id, { limit: 100 })]);
   const byId = new Map(items.map((item) => [item.id, describeItem(item)]));
   const lastChecked = items.reduce<Date | null>((latest, item) => (!latest || item.lastCheckedAt > latest ? item.lastCheckedAt : latest), null);
   const feed: FeedSignal[] = signals.map((signal) => {

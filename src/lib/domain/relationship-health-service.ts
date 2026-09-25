@@ -61,6 +61,7 @@ export async function loadHealthInputs(
       where: { userId, contactId: { in: contactIds }, type: { in: DIRECT_TYPES }, occurredAt: { lte: now } },
       _count: { _all: true },
       _min: { occurredAt: true },
+      _max: { occurredAt: true },
     }),
     prisma.relationshipEdge.findMany({
       where: { userId, fromNodeId: userId, toNodeType: "contact", toNodeId: { in: contactIds } },
@@ -76,7 +77,7 @@ export async function loadHealthInputs(
   }
   for (const row of lifetime) {
     const input = inputs.get(row.contactId);
-    if (input) input.lifetime = { directCount: row._count._all, firstAt: row._min.occurredAt };
+    if (input) input.lifetime = { directCount: row._count._all, firstAt: row._min.occurredAt, lastAt: row._max.occurredAt };
   }
   for (const edge of edges) {
     inputs.get(edge.toNodeId)?.edges?.push({ relationship: edge.relationship, source: edge.source, strength: edge.strength });
@@ -119,9 +120,11 @@ export async function refreshRelationshipHealth(
 ) {
   const now = options.now ?? new Date();
   const coverage = await loadHealthCoverage(prisma, userId);
+  // Without explicit IDs, only contacts with direct interactions or a previously stored health value
+  // are recalculated; the rest would all be INSUFFICIENT_DATA and only cost writes.
   const where: Prisma.ContactWhereInput = options.contactIds
     ? { userId, id: { in: Array.from(new Set(options.contactIds)) } }
-    : { userId };
+    : { userId, OR: [{ interactions: { some: { type: { in: DIRECT_TYPES } } } }, { healthState: { not: null } }] };
   const contacts = await prisma.contact.findMany({
     where,
     select: { id: true, healthScore: true, healthState: true, nextFollowUpAt: true },

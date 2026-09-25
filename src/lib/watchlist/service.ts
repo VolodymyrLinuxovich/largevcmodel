@@ -133,7 +133,7 @@ export async function refreshWatchSignals(prisma: PrismaClient, userId: string, 
       ? prisma.researchClaim.findMany({
           where: { userId, createdAt: { gt: since }, OR: subjectFilter },
           take: RECORD_LIMIT,
-          orderBy: { createdAt: "desc" },
+          orderBy: { createdAt: "asc" },
           select: { id: true, companyId: true, contactId: true, text: true, provenance: true, createdAt: true, _count: { select: { sources: true } } },
         })
       : [],
@@ -141,7 +141,7 @@ export async function refreshWatchSignals(prisma: PrismaClient, userId: string, 
       ? prisma.source.findMany({
           where: { userId, createdAt: { gt: since }, OR: subjectFilter },
           take: RECORD_LIMIT,
-          orderBy: { createdAt: "desc" },
+          orderBy: { createdAt: "asc" },
           select: { id: true, companyId: true, contactId: true, title: true, origin: true, publisher: true, createdAt: true },
         })
       : [],
@@ -149,7 +149,7 @@ export async function refreshWatchSignals(prisma: PrismaClient, userId: string, 
       ? prisma.contactInteraction.findMany({
           where: { userId, contactId: { in: contactIds }, createdAt: { gt: since }, type: { in: ["EMAIL_SENT", "EMAIL_RECEIVED", "CALENDAR_MEETING"] } },
           take: RECORD_LIMIT,
-          orderBy: { createdAt: "desc" },
+          orderBy: { createdAt: "asc" },
           select: { id: true, contactId: true, type: true, occurredAt: true, createdAt: true },
         })
       : [],
@@ -157,7 +157,7 @@ export async function refreshWatchSignals(prisma: PrismaClient, userId: string, 
       ? prisma.relationshipHealthSnapshot.findMany({
           where: { userId, contactId: { in: contactIds }, calculatedAt: { gt: since } },
           take: RECORD_LIMIT,
-          orderBy: { calculatedAt: "desc" },
+          orderBy: { calculatedAt: "asc" },
           select: { id: true, contactId: true, state: true, score: true, previousState: true, previousScore: true, algorithmVersion: true, calculatedAt: true },
         })
       : [],
@@ -173,7 +173,7 @@ export async function refreshWatchSignals(prisma: PrismaClient, userId: string, 
             ],
           },
           take: RECORD_LIMIT,
-          orderBy: { createdAt: "desc" },
+          orderBy: { createdAt: "asc" },
           select: {
             id: true,
             opportunityId: true,
@@ -195,6 +195,17 @@ export async function refreshWatchSignals(prisma: PrismaClient, userId: string, 
       : [],
   ]);
 
+  // Time-windowed queries read oldest-first. If one hit the cap, only advance the checkpoint to just
+  // before the last record processed so the remainder is picked up next time (dedupe absorbs overlap).
+  const truncatedAt = [
+    claims.length === RECORD_LIMIT ? claims.at(-1)!.createdAt : null,
+    sources.length === RECORD_LIMIT ? sources.at(-1)!.createdAt : null,
+    interactions.length === RECORD_LIMIT ? interactions.at(-1)!.createdAt : null,
+    healthSnapshots.length === RECORD_LIMIT ? healthSnapshots.at(-1)!.calculatedAt : null,
+    stageEvents.length === RECORD_LIMIT ? stageEvents.at(-1)!.createdAt : null,
+  ].filter((value): value is Date => value !== null);
+  const checkpoint = truncatedAt.length ? new Date(Math.min(...truncatedAt.map((date) => date.getTime())) - 1) : now;
+
   const candidates = deriveSignals(targets, {
     claims: claims.map(({ _count, ...claim }) => ({ ...claim, sourceCount: _count.sources })),
     sources,
@@ -209,7 +220,7 @@ export async function refreshWatchSignals(prisma: PrismaClient, userId: string, 
       data: candidates.map((candidate) => ({ ...candidate, userId, metadata: candidate.metadata as Prisma.InputJsonObject })),
       skipDuplicates: true,
     }),
-    prisma.watchlistItem.updateMany({ where: { userId, id: { in: items.map((item) => item.id) } }, data: { lastCheckedAt: now } }),
+    prisma.watchlistItem.updateMany({ where: { userId, id: { in: items.map((item) => item.id) } }, data: { lastCheckedAt: checkpoint } }),
   ]);
 
   await audit(prisma, {
@@ -219,7 +230,7 @@ export async function refreshWatchSignals(prisma: PrismaClient, userId: string, 
     action: "Watchlist signals refreshed",
     outcome: "completed",
     dataSource: "Stored workspace records",
-    details: `${items.length} watched items checked; ${inserted.count} new signals.`,
+    details: `${items.length} watched items checked; ${inserted.count} new signals.${truncatedAt.length ? " More records remain; check again." : ""}`,
   });
-  return { checked: items.length, created: inserted.count };
+  return { checked: items.length, created: inserted.count, ...(truncatedAt.length ? { morePending: true } : {}) };
 }

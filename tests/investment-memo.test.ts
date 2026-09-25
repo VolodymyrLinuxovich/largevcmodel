@@ -35,7 +35,7 @@ describe("IC memo: no fabricated recommendation", () => {
     const memo = assembleInvestmentMemo(emptyBundle());
 
     expect(memo.executiveSummary).toContain(
-      "No sensitive key fact (revenue, funding, valuation, headcount, traction, investors, customers) is supported by stored evidence.",
+      "No sensitive key fact (revenue, funding, valuation, headcount, traction, investors, customers) is addressed by attributable evidence.",
     );
     expect(memo.traction.map((fact) => fact.status)).toEqual(["UNAVAILABLE", "UNAVAILABLE", "UNAVAILABLE"]);
     expect(memo.thesisAlignment).toMatchObject({ status: "NO_THESIS" });

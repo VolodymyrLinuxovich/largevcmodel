@@ -101,7 +101,7 @@ export function MeetingBriefView({ content }: { content: MeetingBriefContent }) 
             <ul className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
               {thesis.criteria.map((criterion) => (
                 <li key={criterion.key} className="border border-border px-2 py-1.5">
-                  {enumLabel(criterion.key.replace(/([A-Z])/g, "_$1"))}: <span className="font-mono">{criterion.score}</span>
+                  {enumLabel(criterion.key.replace(/([A-Z])/g, "_$1"))}: <span className="font-mono">{criterion.score ?? "unavailable"}</span>
                   {criterion.weight !== null ? <span className="text-muted-foreground"> (weight {criterion.weight})</span> : null}
                 </li>
               ))}

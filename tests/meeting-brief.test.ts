@@ -49,7 +49,7 @@ describe("meeting brief provenance", () => {
     claim({ id: "c-public", text: "Acme reported $2M ARR in 2026.", category: "revenue", provenance: "PUBLIC_RESEARCH", sources: [{ id: "s1", url: "https://news.example.com/acme" }] }),
     claim({ id: "c-uncited", text: "Acme raised a $5M seed round.", category: "funding", provenance: "PUBLIC_RESEARCH" }),
     claim({ id: "c-inferred", text: "Acme is likely valued above $30M.", category: "valuation", provenance: "AI_INFERENCE" }),
-    claim({ id: "c-user", text: "Founder said they have 12 employees.", category: "team", provenance: "USER_PROVIDED" }),
+    claim({ id: "c-user", text: "Founder said they have 12 employees.", category: "employees", provenance: "USER_PROVIDED" }),
   ];
 
   it("places cited public claims in research and keeps uncited or inferred ones out of the facts", () => {
@@ -105,6 +105,35 @@ describe("meeting brief provenance", () => {
       ["Sector: Robotics", "USER_PROVIDED"],
       ["Website: https://acme.example", "USER_PROVIDED"],
     ]);
+  });
+
+  it("does not mark a fact as found because a claim merely mentions its keyword", () => {
+    const brief = assembleMeetingBrief(
+      emptyBundle({
+        claims: [
+          claim({ id: "c1", text: "The company has not disclosed revenue.", category: "overview", provenance: "PUBLIC_RESEARCH", sources: [{ id: "s1", url: "https://a.example" }] }),
+          claim({ id: "c2", text: "Founded by former Google employees.", category: "team", provenance: "PUBLIC_RESEARCH", sources: [{ id: "s2", url: "https://b.example" }] }),
+        ],
+      }),
+    );
+    const facts = Object.fromEntries(brief.facts.keyFacts.map((fact) => [fact.key, fact.status]));
+
+    expect(facts.revenue).toBe("UNAVAILABLE");
+    expect(facts.employees).toBe("UNAVAILABLE");
+  });
+
+  it("does not let a research provider label its own output as user-provided or connected-account evidence", () => {
+    const brief = assembleMeetingBrief(
+      emptyBundle({
+        claims: [claim({ id: "c1", text: "ARR is $5M.", category: "revenue", provenance: "USER_PROVIDED", researchRunId: "run-1" })],
+      }),
+    );
+
+    expect(brief.facts.research).toEqual([]);
+    expect(brief.unverified.map((item) => item.record.id)).toEqual(["c1"]);
+    expect(brief.facts.keyFacts.find((fact) => fact.key === "revenue")?.status).toBe("UNVERIFIED");
+    expect(classifyClaim("CONNECTED_ACCOUNT", 0, true)).toBe("UNVERIFIED");
+    expect(classifyClaim("PUBLIC_RESEARCH", 1, true)).toBe("PUBLIC_SOURCE");
   });
 
   it("maps every ClaimProvenance value to an evidence class", () => {
@@ -168,6 +197,27 @@ describe("meeting brief relationship context", () => {
     const texts = brief.generated.concerns.map((concern) => concern.text);
     expect(texts).toContain("Every assessed relationship on this opportunity is cooling or dormant.");
     expect(texts).toContain("Stored research may be stale.");
+  });
+
+  it("does not present a fit score calculated against a different thesis as current", () => {
+    const fitScore = {
+      id: "f1",
+      overall: 78,
+      confidence: 60,
+      criteria: { thesisMatch: 92, stageFit: null },
+      weights: { thesisMatch: 30, stageFit: 20 },
+      missingInfo: [],
+      explanation: "x",
+      modelOrProvider: "LargeVCModel heuristic v1",
+      calculatedAt: NOW,
+      scoredThesisName: "Old thesis",
+    };
+    const stale = assembleMeetingBrief(emptyBundle({ fitScore: { ...fitScore, thesisChanged: true } }));
+    const current = assembleMeetingBrief(emptyBundle({ fitScore: { ...fitScore, thesisChanged: false } }));
+
+    expect(stale.facts.thesis).toMatchObject({ status: "NOT_SCORED" });
+    expect(stale.facts.thesis.explanation).toContain('"Old thesis"');
+    expect(current.facts.thesis).toMatchObject({ status: "SCORED", thesisName: "Old thesis", criteria: [{ key: "thesisMatch", score: 92 }, { key: "stageFit", score: null }] });
   });
 
   it("names the brief after the target meeting when one is selected", () => {

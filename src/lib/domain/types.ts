@@ -88,14 +88,17 @@ export type CandidateScoreInput = {
   } | null;
 };
 
+/** A criterion score, or null when the data needed to assess it is unavailable. */
+export type ScoringCriterion = number | null;
+
 export type CandidateScore = {
   contactId?: string | null;
   companyId?: string | null;
-  thesisMatch: number;
-  stageFit: number;
-  geographyFit: number;
-  momentum: number;
-  relationship: number;
+  thesisMatch: ScoringCriterion;
+  stageFit: ScoringCriterion;
+  geographyFit: ScoringCriterion;
+  momentum: ScoringCriterion;
+  relationship: ScoringCriterion;
   evidence: number;
   overall: number;
   confidence: number;

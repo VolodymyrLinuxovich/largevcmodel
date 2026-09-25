@@ -7,7 +7,7 @@ export const NOW = new Date("2026-09-01T12:00:00.000Z");
 export const DAY = 86_400_000;
 export const daysAgo = (days: number) => new Date(NOW.getTime() - days * DAY);
 
-type ClaimInput = { id: string; text: string; category: string; provenance: ClaimProvenance; sources?: Array<{ id: string; url: string; accessedDaysAgo?: number }> };
+type ClaimInput = { id: string; text: string; category: string; provenance: ClaimProvenance; researchRunId?: string | null; sources?: Array<{ id: string; url: string; accessedDaysAgo?: number }> };
 
 export function claim(input: ClaimInput): EvidenceBundle["claims"][number] {
   return {
@@ -17,6 +17,7 @@ export function claim(input: ClaimInput): EvidenceBundle["claims"][number] {
     provenance: input.provenance,
     confidence: 70,
     extractedAt: daysAgo(3),
+    researchRunId: input.researchRunId ?? null,
     subject: "company",
     contactId: null,
     sources: (input.sources ?? []).map((source) => ({

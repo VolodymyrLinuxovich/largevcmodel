@@ -60,12 +60,17 @@ export type EvidenceBundle = {
     id: string;
     overall: number;
     confidence: number;
-    criteria: Record<string, number>;
+    /** null marks a criterion that was unavailable and excluded from the score. */
+    criteria: Record<string, number | null>;
     weights: Record<string, number>;
     missingInfo: string[];
     explanation: string;
     modelOrProvider: string;
     calculatedAt: Date;
+    /** Name of the thesis the score was calculated against (may differ from the current thesis). */
+    scoredThesisName: string | null;
+    /** True when the score was calculated against a different thesis than the one now in effect. */
+    thesisChanged: boolean;
   } | null;
   people: Array<{
     contactId: string;
@@ -100,6 +105,13 @@ function numberRecord(value: unknown): Record<string, number> {
   return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, number] => typeof entry[1] === "number"));
 }
 
+function criteriaRecord(value: unknown): Record<string, number | null> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value).filter((entry): entry is [string, number | null] => typeof entry[1] === "number" || entry[1] === null),
+  );
+}
+
 const meetingSelect = { id: true, title: true, startsAt: true, endsAt: true, attendees: true, htmlLink: true, contactId: true } as const;
 
 /**
@@ -118,7 +130,7 @@ export async function loadOpportunityEvidence(
     include: {
       company: true,
       thesis: true,
-      currentFitScore: true,
+      currentFitScore: { include: { thesis: { select: { id: true, name: true } } } },
       introducedBy: { select: { id: true, fullName: true, primaryEmail: true } },
       contacts: {
         orderBy: { createdAt: "asc" },
@@ -185,7 +197,8 @@ export async function loadOpportunityEvidence(
       : [],
     contactIds.length
       ? prisma.relationshipEdge.findMany({
-          where: { userId, toNodeId: { in: contactIds } },
+          // Only edges from the user to the linked contacts count as the user's own relationship evidence.
+          where: { userId, fromNodeId: userId, toNodeType: "contact", toNodeId: { in: contactIds } },
           select: { id: true, toNodeId: true, relationship: true, source: true, strength: true, evidence: true },
         })
       : [],
@@ -197,6 +210,13 @@ export async function loadOpportunityEvidence(
       : prisma.investmentThesis.findFirst({ where: { userId, active: true }, orderBy: { updatedAt: "desc" } }),
   ]);
   if (options.calendarEventId && !targetMeeting) throw new ApiError(404, "Calendar event not found", "CALENDAR_EVENT_NOT_FOUND");
+  if (
+    targetMeeting &&
+    !(targetMeeting.contactId && contactIds.includes(targetMeeting.contactId)) &&
+    !targetMeeting.attendees.some((attendee) => emails.includes(attendee.toLowerCase()))
+  ) {
+    throw new ApiError(422, "The selected meeting does not include anyone linked to this opportunity.", "MEETING_NOT_RELATED");
+  }
 
   const healthInputs = await loadHealthInputs(prisma, userId, contactIds, now, coverage);
   const fit = opportunity.currentFitScore;
@@ -236,12 +256,14 @@ export async function loadOpportunityEvidence(
           id: fit.id,
           overall: fit.overall,
           confidence: fit.confidence,
-          criteria: numberRecord(fit.criteria),
+          criteria: criteriaRecord(fit.criteria),
           weights: numberRecord(fit.weights),
           missingInfo: fit.missingInfo,
           explanation: fit.explanation,
           modelOrProvider: fit.modelOrProvider,
           calculatedAt: fit.calculatedAt,
+          scoredThesisName: fit.thesis?.name ?? null,
+          thesisChanged: (fit.thesisId ?? null) !== (thesis?.id ?? null),
         }
       : null,
     people: opportunity.contacts.map((link) => ({
@@ -263,6 +285,7 @@ export async function loadOpportunityEvidence(
       provenance: claim.provenance,
       confidence: claim.confidence,
       extractedAt: claim.extractedAt,
+      researchRunId: claim.researchRunId,
       subject: claim.companyId === opportunity.companyId ? "company" : "contact",
       contactId: claim.contactId,
       sources: claim.sources.map((join) => join.source),

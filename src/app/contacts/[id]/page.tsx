@@ -5,6 +5,7 @@ import { EmptyState, HeroHeader, PageFrame, Section, SignInPanel, Timestamp } fr
 import { getWorkspaceData } from "@/lib/workspace";
 import { prisma } from "@/lib/prisma";
 import { sourceDomain } from "@/lib/domain/sources";
+import { safeExternalUrl } from "@/lib/evidence/safe-url";
 import { getContactRelationshipHealth } from "@/lib/domain/relationship-health-service";
 import { RelationshipHealthPanel } from "@/components/relationships/relationship-health-panel";
 import { WatchButton } from "@/components/watchlist/watch-button";
@@ -116,7 +117,7 @@ export default async function ContactProfilePage({ params }: { params: Promise<{
                     <Badge variant={claim.provenance === "UNVERIFIED" ? "warning" : "muted"}>{claim.provenance.replaceAll("_", " ")}</Badge>
                     <Badge variant="outline">confidence {claim.confidence ?? "N/A"}</Badge>
                     {claim.sources.map((join, index) => (
-                      <a key={join.sourceId} href={join.source.url} target="_blank" rel="noreferrer" className="font-mono text-[0.7rem] uppercase tracking-[0.08em] underline">
+                      <a key={join.sourceId} href={safeExternalUrl(join.source.url) ?? undefined} target="_blank" rel="noreferrer" className="font-mono text-[0.7rem] uppercase tracking-[0.08em] underline">
                         [{index + 1}]
                       </a>
                     ))}
@@ -134,7 +135,7 @@ export default async function ContactProfilePage({ params }: { params: Promise<{
       <section className="grid border-b border-border lg:grid-cols-2">
         <Panel title="Gmail threads" emptyTitle="No Gmail history" emptyBody="Connect and sync Gmail to view real conversation threads.">
           {contact.gmailThreads.map((thread) => (
-            <a key={thread.id} href={thread.threadUrl ?? undefined} target="_blank" rel="noreferrer" className="block py-4 transition-colors hover:text-primary">
+            <a key={thread.id} href={safeExternalUrl(thread.threadUrl) ?? undefined} target="_blank" rel="noreferrer" className="block py-4 transition-colors hover:text-primary">
               <p className="text-sm font-semibold">{thread.subject ?? "Email thread"}</p>
               <p className="mt-2 text-xs leading-5 text-muted-foreground">{thread.snippet ?? "No snippet available."}</p>
             </a>
@@ -142,7 +143,7 @@ export default async function ContactProfilePage({ params }: { params: Promise<{
         </Panel>
         <Panel title="Calendar evidence" emptyTitle="No calendar history" emptyBody="Connect and sync Google Calendar to view calendar evidence for this contact.">
           {contact.calendarEvents.map((event) => (
-            <a key={event.id} href={event.htmlLink ?? undefined} target="_blank" rel="noreferrer" className="block py-4 transition-colors hover:text-primary">
+            <a key={event.id} href={safeExternalUrl(event.htmlLink) ?? undefined} target="_blank" rel="noreferrer" className="block py-4 transition-colors hover:text-primary">
               <p className="text-sm font-semibold">{event.title ?? "Calendar event"}</p>
               <p className="mt-2 font-mono text-[0.7rem] uppercase tracking-[0.08em] text-muted-foreground"><Timestamp value={event.startsAt} /></p>
             </a>
@@ -158,7 +159,7 @@ function SourcesList({ sources }: { sources: Array<{ id: string; title: string; 
   return (
     <div className="divide-y divide-border border-y border-border">
       {sources.map((source) => (
-        <a key={source.id} href={source.url} target="_blank" rel="noreferrer" className="block py-4 transition-colors hover:text-primary">
+        <a key={source.id} href={safeExternalUrl(source.url) ?? undefined} target="_blank" rel="noreferrer" className="block py-4 transition-colors hover:text-primary">
           <div className="flex items-start justify-between gap-4">
             <p className="text-sm font-semibold">{source.title}</p>
             <Badge variant="muted">{source.origin}</Badge>

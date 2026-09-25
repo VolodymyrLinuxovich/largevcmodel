@@ -14,10 +14,12 @@ export const researchRequestSchema = z.object({
   query: z.string().min(2).max(1000),
 });
 
-function claimProvenance(value: string) {
+/**
+ * Maps provider-reported provenance. A research provider cannot certify its own output as
+ * user-provided or connected-account evidence, so those labels are stored as UNVERIFIED.
+ */
+export function claimProvenance(value: string) {
   if (value === "public_research") return ClaimProvenance.PUBLIC_RESEARCH;
-  if (value === "connected_account") return ClaimProvenance.CONNECTED_ACCOUNT;
-  if (value === "user_provided") return ClaimProvenance.USER_PROVIDED;
   if (value === "ai_inference") return ClaimProvenance.AI_INFERENCE;
   return ClaimProvenance.UNVERIFIED;
 }

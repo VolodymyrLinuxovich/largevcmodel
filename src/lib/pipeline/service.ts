@@ -3,6 +3,8 @@ import "server-only";
 import { OpportunityEventType, Prisma, type PrismaClient } from "@prisma/client";
 import { ApiError } from "@/lib/api/errors";
 import { audit } from "@/lib/audit";
+import { calculateRelationshipHealth } from "@/lib/domain/relationship-health";
+import { loadHealthInputs } from "@/lib/domain/relationship-health-service";
 import { calculateFitScore, DEFAULT_SCORING_WEIGHTS } from "@/lib/domain/scoring";
 import type { CreateOpportunityInput, StageChangeInput, UpdateOpportunityInput } from "./schemas";
 import { openCompanyKey, STAGE_LABELS } from "./stages";
@@ -33,21 +35,32 @@ function definedFields<T extends Record<string, unknown>>(value: T) {
   return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)) as Partial<T>;
 }
 
-async function resolveCompany(prisma: PrismaClient, userId: string, input: CreateOpportunityInput) {
+const COMPANY_DETAIL_FIELDS = ["domain", "website", "description", "sector", "stage", "geography", "businessModel"] as const;
+
+/**
+ * Finds or creates the company inside the caller's transaction. For an existing company only empty
+ * fields are filled: re-entering a company name never overwrites facts already recorded.
+ */
+async function resolveCompany(tx: Prisma.TransactionClient, userId: string, input: CreateOpportunityInput) {
   if (input.companyId) {
-    const company = await prisma.company.findFirst({ where: { id: input.companyId, userId }, select: { id: true, name: true } });
+    const company = await tx.company.findFirst({ where: { id: input.companyId, userId }, select: { id: true, name: true } });
     if (!company) throw new ApiError(404, "Company not found", "COMPANY_NOT_FOUND");
     return company;
   }
   const { name, ...details } = input.company!;
-  const provided = Object.fromEntries(Object.entries(details).filter(([, value]) => value !== undefined && value !== null));
-  return prisma.company.upsert({
-    where: { userId_name: { userId, name } },
-    create: { userId, name, source: "user", ...provided },
-    // Only fill fields the user supplied; existing company facts are never blanked.
-    update: provided,
-    select: { id: true, name: true },
-  });
+  const existing = await tx.company.findUnique({ where: { userId_name: { userId, name } } });
+  if (!existing) {
+    const provided = Object.fromEntries(Object.entries(details).filter(([, value]) => value !== undefined && value !== null));
+    return tx.company.create({ data: { userId, name, source: "user", ...provided }, select: { id: true, name: true } });
+  }
+  const fill = Object.fromEntries(
+    COMPANY_DETAIL_FIELDS.filter((field) => existing[field] === null && details[field] !== undefined && details[field] !== null).map((field) => [
+      field,
+      details[field],
+    ]),
+  );
+  if (Object.keys(fill).length) await tx.company.update({ where: { id: existing.id }, data: fill });
+  return { id: existing.id, name: existing.name };
 }
 
 export async function createOpportunity(prisma: PrismaClient, actor: Actor, input: CreateOpportunityInput) {
@@ -55,10 +68,9 @@ export async function createOpportunity(prisma: PrismaClient, actor: Actor, inpu
     thesisId: input.thesisId,
     contactIds: [...input.contacts.map((contact) => contact.contactId), ...(input.introducedByContactId ? [input.introducedByContactId] : [])],
   });
-  const company = await resolveCompany(prisma, actor.id, input);
-
   try {
-    const opportunity = await prisma.$transaction(async (tx) => {
+    const { opportunity, company } = await prisma.$transaction(async (tx) => {
+      const company = await resolveCompany(tx, actor.id, input);
       const created = await tx.opportunity.create({
         data: {
           userId: actor.id,
@@ -93,7 +105,7 @@ export async function createOpportunity(prisma: PrismaClient, actor: Actor, inpu
           note: `Created from ${input.source?.toLowerCase().replaceAll("_", " ") ?? "other"} source.`,
         },
       });
-      return created;
+      return { opportunity: created, company };
     });
 
     await audit(prisma, {
@@ -109,8 +121,13 @@ export async function createOpportunity(prisma: PrismaClient, actor: Actor, inpu
     return opportunity;
   } catch (error) {
     if (isUniqueViolation(error, "openCompanyKey")) {
+      // The transaction rolled back, so find the conflicting open opportunity by company identity.
       const existing = await prisma.opportunity.findFirst({
-        where: { userId: actor.id, openCompanyKey: openCompanyKey(actor.id, company.id, "SOURCED") },
+        where: {
+          userId: actor.id,
+          openCompanyKey: { not: null },
+          company: input.companyId ? { id: input.companyId } : { name: input.company!.name },
+        },
         select: { id: true },
       });
       throw new ApiError(409, OPEN_OPPORTUNITY_CONFLICT, "OPEN_OPPORTUNITY_EXISTS", { opportunityId: existing?.id ?? null });
@@ -136,9 +153,12 @@ export async function updateOpportunity(prisma: PrismaClient, actor: Actor, id: 
   });
 
   const updated = await prisma.$transaction(async (tx) => {
+    // A fit score only applies to the thesis it was calculated against.
+    const current = data.thesisId !== undefined ? await tx.opportunity.findFirst({ where: { id, userId: actor.id }, select: { thesisId: true } }) : null;
+    const thesisChanged = current !== null && current.thesisId !== data.thesisId;
     const result = await tx.opportunity.updateMany({
       where: { id, userId: actor.id, version: expectedVersion },
-      data: { ...data, version: { increment: 1 } },
+      data: { ...data, ...(thesisChanged ? { currentFitScoreId: null } : {}), version: { increment: 1 } },
     });
     if (result.count === 0) await versionConflictOrMissing(tx, actor.id, id);
     await tx.opportunityEvent.create({
@@ -148,7 +168,7 @@ export async function updateOpportunity(prisma: PrismaClient, actor: Actor, id: 
         type: OpportunityEventType.UPDATED,
         actor: actor.email,
         // Field names only: notes and other free text are not duplicated into history.
-        metadata: { fields: Object.keys(data) },
+        metadata: { fields: Object.keys(data), ...(thesisChanged ? { fitScoreCleared: true } : {}) },
       },
     });
     return tx.opportunity.findFirstOrThrow({ where: { id, userId: actor.id } });
@@ -292,52 +312,52 @@ export async function unlinkOpportunityContact(prisma: PrismaClient, actor: Acto
 
 /**
  * Scores the opportunity's company against its thesis (or the most recent active thesis) with the
- * existing heuristic. Relationship input is the strongest observed health among linked people.
+ * existing heuristic. Relationship input is the strongest health among linked people, computed live
+ * so a stale stored value cannot leak into the score.
  */
-export async function scoreOpportunity(prisma: PrismaClient, actor: Actor, opportunityId: string) {
+export async function scoreOpportunity(prisma: PrismaClient, actor: Actor, opportunityId: string, now = new Date()) {
   const opportunity = await prisma.opportunity.findFirst({
     where: { id: opportunityId, userId: actor.id },
     include: {
       company: true,
       currentFitScore: { select: { overall: true } },
-      contacts: {
-        include: {
-          contact: { select: { id: true, healthScore: true, healthState: true, interactionCount: true, lastInteractionAt: true } },
-        },
-      },
+      contacts: { select: { contactId: true } },
     },
   });
   if (!opportunity) throw new ApiError(404, "Opportunity not found", "OPPORTUNITY_NOT_FOUND");
 
-  const [thesis, sourceCount, supportedClaimCount] = await Promise.all([
+  const contactIds = opportunity.contacts.map((link) => link.contactId);
+  const [thesis, sourceCount, supportedClaimCount, healthInputs] = await Promise.all([
     opportunity.thesisId
       ? prisma.investmentThesis.findFirst({ where: { id: opportunity.thesisId, userId: actor.id } })
       : prisma.investmentThesis.findFirst({ where: { userId: actor.id, active: true }, orderBy: { updatedAt: "desc" } }),
     prisma.source.count({ where: { userId: actor.id, companyId: opportunity.companyId } }),
     prisma.researchClaim.count({ where: { userId: actor.id, companyId: opportunity.companyId, sources: { some: {} } } }),
+    loadHealthInputs(prisma, actor.id, contactIds, now),
   ]);
 
-  const assessed = opportunity.contacts
-    .map((link) => link.contact)
-    .filter((contact) => contact.healthScore !== null && contact.healthState !== "INSUFFICIENT_DATA");
-  const strongest = assessed.sort((a, b) => (b.healthScore ?? 0) - (a.healthScore ?? 0))[0] ?? null;
+  const strongest =
+    contactIds
+      .map((id) => ({ id, health: calculateRelationshipHealth(healthInputs.get(id)!) }))
+      .filter((entry) => entry.health.score !== null)
+      .sort((a, b) => b.health.score! - a.health.score!)[0] ?? null;
   const score = calculateFitScore(
     {
       companyId: opportunity.companyId,
-      organization: opportunity.company.name,
+      // No organization fallback: the company name is not a sector, so a missing sector stays unavailable.
       sector: opportunity.company.sector,
       stage: opportunity.company.stage,
       geography: opportunity.company.geography,
-      relationshipStrength: strongest?.healthScore ?? null,
-      interactionCount: strongest?.interactionCount ?? null,
-      lastInteractionAt: strongest?.lastInteractionAt ?? null,
+      relationshipStrength: strongest?.health.score ?? null,
+      interactionCount: strongest?.health.trend.recentCount ?? null,
+      lastInteractionAt: strongest?.health.lastInteractionAt ?? null,
       sourceCount,
       supportedClaimCount,
       thesis,
     },
     DEFAULT_SCORING_WEIGHTS,
   );
-  const missingInfo = strongest ? score.missingInfo : [...score.missingInfo, "No linked person has an assessed relationship health."];
+  const missingInfo = score.missingInfo;
 
   const stored = await prisma.$transaction(async (tx) => {
     const fitScore = await tx.fitScore.create({
@@ -361,7 +381,7 @@ export async function scoreOpportunity(prisma: PrismaClient, actor: Actor, oppor
           sourceCount,
           supportedClaimCount,
           relationshipContactId: strongest?.id ?? null,
-          relationshipHealthScore: strongest?.healthScore ?? null,
+          relationshipHealthScore: strongest?.health.score ?? null,
         },
         missingInfo,
         explanation: score.explanation,
