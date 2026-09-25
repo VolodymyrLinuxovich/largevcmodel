@@ -200,12 +200,12 @@ describe("opportunity service authorization and concurrency", () => {
     expect(error).toMatchObject({ status: 409, code: "OPEN_OPPORTUNITY_EXISTS", details: { opportunityId: "existing" } });
   });
 
-  it("never blanks existing company fields when a known company is re-entered", async () => {
-    const fake = fakePipelinePrisma({});
+  it("only fills empty fields when a known company is re-entered", async () => {
+    const fake = fakePipelinePrisma({ existingCompany: { id: "co", name: "Acme", sector: "Robotics", geography: null } });
 
-    await createOpportunity(fake.prisma, actor, createOpportunitySchema.parse({ company: { name: "Acme", sector: "", geography: "Kyiv" } }));
-    expect(fake.companyUpserts[0]).toMatchObject({ update: { geography: "Kyiv" } });
-    expect(fake.companyUpserts[0]?.update).not.toHaveProperty("sector");
+    await createOpportunity(fake.prisma, actor, createOpportunitySchema.parse({ company: { name: "Acme", sector: "Drones", geography: "Kyiv" } }));
+    expect(fake.companyUpdates).toEqual([{ where: { id: "co" }, data: { geography: "Kyiv" } }]);
+    expect(fake.created[0]).toMatchObject({ companyId: "co" });
   });
 
   it("only writes supplied fields on update", async () => {
@@ -221,12 +221,19 @@ describe("opportunity service authorization and concurrency", () => {
 
 type FakeOpportunity = { id: string; userId: string; companyId: string; stage: "SOURCED"; passReason: null; version: number };
 
-function fakePipelinePrisma(options: { opportunity?: FakeOpportunity; ownedContactIds?: string[]; failCreateWithUnique?: boolean }) {
+type FakeCompany = { id: string; name: string; sector: string | null; geography: string | null };
+
+function fakePipelinePrisma(options: {
+  opportunity?: FakeOpportunity;
+  ownedContactIds?: string[];
+  failCreateWithUnique?: boolean;
+  existingCompany?: FakeCompany;
+}) {
   const updates: Array<{ where: Record<string, unknown>; data: Record<string, unknown> }> = [];
   const events: Array<Record<string, unknown>> = [];
   const audits: Array<Record<string, unknown>> = [];
   const created: Array<Record<string, unknown>> = [];
-  const companyUpserts: Array<{ update: Record<string, unknown> }> = [];
+  const companyUpdates: Array<{ where: Record<string, unknown>; data: Record<string, unknown> }> = [];
   const matches = (where: Record<string, unknown>) =>
     options.opportunity &&
     (where.id === undefined || where.id === options.opportunity.id) &&
@@ -260,7 +267,12 @@ function fakePipelinePrisma(options: { opportunity?: FakeOpportunity; ownedConta
     opportunityEvent: { create: async ({ data }: { data: Record<string, unknown> }) => (events.push(data), data) },
     opportunityContact: { createMany: async () => ({ count: 0 }) },
     company: {
-      upsert: async (args: { update: Record<string, unknown> }) => (companyUpserts.push(args), { id: "co", name: "Acme" }),
+      findUnique: async () =>
+        options.existingCompany
+          ? { domain: null, website: null, description: null, stage: null, businessModel: null, ...options.existingCompany }
+          : null,
+      create: async ({ data }: { data: { name: string } }) => ({ id: "co", name: data.name }),
+      update: async (args: { where: Record<string, unknown>; data: Record<string, unknown> }) => (companyUpdates.push(args), args.data),
       findFirst: async () => null,
     },
     contact: {
@@ -272,5 +284,5 @@ function fakePipelinePrisma(options: { opportunity?: FakeOpportunity; ownedConta
   };
   client.$transaction = async (callback: (tx: unknown) => Promise<unknown>) => callback(client);
 
-  return { prisma: client as unknown as PrismaClient, updates, events, audits, created, companyUpserts };
+  return { prisma: client as unknown as PrismaClient, updates, events, audits, created, companyUpdates };
 }

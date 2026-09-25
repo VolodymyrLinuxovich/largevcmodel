@@ -1,4 +1,4 @@
-import { claimToEvidence, isEstablished, resolveKeyFacts, toSourceRef, type SensitiveFactKey } from "./classify";
+import { claimToEvidence, isEstablished, matchesTopic, resolveKeyFacts, toSourceRef, type SensitiveFactKey } from "./classify";
 import type { EvidenceBundle } from "./loader";
 import { safeExternalUrl } from "./safe-url";
 import type { EvidenceItem, GeneratedItem, KeyFact, SourceRef } from "./types";
@@ -48,17 +48,12 @@ export function partitionClaims(items: EvidenceItem[]) {
   };
 }
 
-const GENERIC_CATEGORIES = /^(|other|general|misc|miscellaneous|research|unknown|uncategorized)$/i;
-
 /**
  * Selects items by their stored category. Claim text is consulted only for uncategorized claims,
  * so a keyword in one claim's wording cannot move it into an unrelated section.
  */
 export function byCategory(items: EvidenceItem[], pattern: RegExp) {
-  return items.filter((item) => {
-    const category = (item.category ?? "").trim();
-    return GENERIC_CATEGORIES.test(category) ? pattern.test(item.text) : pattern.test(category);
-  });
+  return items.filter((item) => matchesTopic(item, pattern));
 }
 
 /** Sources cited by the given items, deduplicated, in first-citation order so numbering is stable. */
@@ -184,7 +179,7 @@ export type ThesisCompatibility =
       thesisName: string | null;
       overall: number;
       confidence: number;
-      criteria: Array<{ key: string; score: number; weight: number | null }>;
+      criteria: Array<{ key: string; score: number | null; weight: number | null }>;
       missingInfo: string[];
       explanation: string;
       modelOrProvider: string;
@@ -198,9 +193,16 @@ export function thesisCompatibility(bundle: EvidenceBundle): ThesisCompatibility
       : { status: "NO_THESIS", explanation: "No investment thesis is saved, so thesis compatibility cannot be assessed." };
   }
   const fit = bundle.fitScore;
+  if (fit.thesisChanged) {
+    return {
+      status: "NOT_SCORED",
+      thesisName: bundle.thesis?.name ?? "No thesis",
+      explanation: `The stored score (${fit.overall}) was calculated against ${fit.scoredThesisName ? `"${fit.scoredThesisName}"` : "no thesis"}, not the thesis now in effect. Rescore the opportunity.`,
+    };
+  }
   return {
     status: "SCORED",
-    thesisName: bundle.thesis?.name ?? null,
+    thesisName: fit.scoredThesisName,
     overall: fit.overall,
     confidence: fit.confidence,
     criteria: Object.entries(fit.criteria).map(([key, score]) => ({ key, score, weight: fit.weights[key] ?? null })),
@@ -254,7 +256,7 @@ export function concerns(bundle: EvidenceBundle, items: EvidenceItem[]): Generat
   }
   if (bundle.fitScore) {
     for (const [key, score] of Object.entries(bundle.fitScore.criteria)) {
-      if (["thesisMatch", "stageFit", "geographyFit"].includes(key) && score > 0 && score < 50) {
+      if (["thesisMatch", "stageFit", "geographyFit"].includes(key) && score !== null && score < 50) {
         flags.push({ kind: "GENERATED_SUGGESTION", text: `Low ${key.replace(/([A-Z])/g, " $1").toLowerCase()} in the stored fit score.`, basis: `Criterion score ${score}/100.` });
       }
     }
@@ -300,7 +302,7 @@ export function suggestedQuestions(bundle: EvidenceBundle, facts: KeyFact[], ite
     questions.push({ kind: "GENERATED_SUGGESTION", text: `Can you confirm: "${item.text}"?`, basis: `Unverified claim ${item.record.id}.` });
   }
   if (bundle.thesis && bundle.fitScore) {
-    const weak = Object.entries(bundle.fitScore.criteria).filter(([key, score]) => ["stageFit", "geographyFit"].includes(key) && score < 50);
+    const weak = Object.entries(bundle.fitScore.criteria).filter(([key, score]) => ["stageFit", "geographyFit"].includes(key) && score !== null && score < 50);
     for (const [key] of weak) {
       const target = key === "stageFit" ? bundle.thesis.stages.join(", ") : bundle.thesis.geographies.join(", ");
       if (target) {

@@ -19,7 +19,7 @@ export function KeyFactsTable({ facts, citations }: { facts: KeyFact[]; citation
               <th scope="row" className="py-2 pr-3 font-normal">{fact.label}</th>
               <td className="py-2 pr-3">
                 <Badge variant={fact.status === "ESTABLISHED" ? "success" : fact.status === "UNVERIFIED" ? "warning" : "muted"}>
-                  {fact.status === "UNAVAILABLE" ? "Unavailable" : fact.status === "UNVERIFIED" ? "Unverified" : "Supported"}
+                  {fact.status === "UNAVAILABLE" ? "Unavailable" : fact.status === "UNVERIFIED" ? "Unverified only" : "Evidence found"}
                 </Badge>
               </td>
               <td className="py-2 text-xs leading-5 text-muted-foreground">

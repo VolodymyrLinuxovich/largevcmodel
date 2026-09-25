@@ -187,7 +187,7 @@ export function MemoView({ content }: { content: InvestmentMemoContent }) {
                 {score.criteria.map((criterion) => (
                   <tr key={criterion.key}>
                     <th scope="row" className="py-2 pr-3 font-normal">{enumLabel(criterion.key.replace(/([A-Z])/g, "_$1"))}</th>
-                    <td className="py-2 pr-3 font-mono">{criterion.score}</td>
+                    <td className="py-2 pr-3 font-mono">{criterion.score ?? "Unavailable"}</td>
                     <td className="py-2 font-mono">{criterion.weight ?? "N/A"}</td>
                   </tr>
                 ))}

@@ -5,8 +5,11 @@ import { ESTABLISHED_CLASSES, type EvidenceClass, type EvidenceItem, type KeyFac
 /**
  * Maps the repository's ClaimProvenance onto evidence classes. A PUBLIC_RESEARCH claim without any
  * stored source is downgraded to UNVERIFIED: a public claim is only as good as its citation.
+ * Claims produced by a research provider cannot certify themselves as user-provided or
+ * connected-account evidence; such labels are treated as unverified.
  */
-export function classifyClaim(provenance: ClaimProvenance, sourceCount: number): EvidenceClass {
+export function classifyClaim(provenance: ClaimProvenance, sourceCount: number, fromResearchProvider = false): EvidenceClass {
+  if (fromResearchProvider && (provenance === "USER_PROVIDED" || provenance === "CONNECTED_ACCOUNT")) return "UNVERIFIED";
   switch (provenance) {
     case "PUBLIC_RESEARCH":
       return sourceCount > 0 ? "PUBLIC_SOURCE" : "UNVERIFIED";
@@ -56,6 +59,8 @@ export type StoredClaim = {
   provenance: ClaimProvenance;
   confidence: number | null;
   extractedAt: Date;
+  /** Set when the claim was produced by a research provider run. */
+  researchRunId: string | null;
   sources: StoredSource[];
 };
 
@@ -64,7 +69,7 @@ export function claimToEvidence(claim: StoredClaim): EvidenceItem {
     id: `claim:${claim.id}`,
     text: claim.text,
     category: claim.category,
-    evidenceClass: classifyClaim(claim.provenance, claim.sources.length),
+    evidenceClass: classifyClaim(claim.provenance, claim.sources.length, claim.researchRunId !== null),
     confidence: claim.confidence,
     sourceIds: claim.sources.map((source) => source.id),
     record: { type: "claim", id: claim.id },
@@ -88,9 +93,21 @@ export const SENSITIVE_FACTS = [
 
 export type SensitiveFactKey = (typeof SENSITIVE_FACTS)[number]["key"];
 
+const GENERIC_CATEGORY = /^(|other|general|misc|miscellaneous|research|unknown|uncategorized)$/i;
+
+/** Category-first matching: claim wording is only consulted for uncategorized claims. */
+export function matchesTopic(item: Pick<EvidenceItem, "category" | "text">, pattern: RegExp) {
+  const category = (item.category ?? "").trim();
+  return GENERIC_CATEGORY.test(category) ? pattern.test(item.text) : pattern.test(category);
+}
+
+/**
+ * ESTABLISHED means stored, attributable evidence addresses the fact (the claim text is always shown
+ * next to it); it does not mean LargeVCModel validated the figure.
+ */
 export function resolveKeyFacts(items: EvidenceItem[]): KeyFact[] {
   return SENSITIVE_FACTS.map((fact) => {
-    const matching = items.filter((item) => fact.pattern.test(`${item.category ?? ""} ${item.text}`));
+    const matching = items.filter((item) => matchesTopic(item, fact.pattern));
     const established = matching.filter(isEstablished);
     return {
       key: fact.key,

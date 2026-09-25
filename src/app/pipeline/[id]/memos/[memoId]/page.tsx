@@ -8,15 +8,16 @@ import { HeroHeader, PageFrame, Section, SignInPanel } from "@/components/worksp
 import { getInvestmentMemo } from "@/lib/memos/service";
 import { prisma } from "@/lib/prisma";
 import { formatTime } from "@/lib/utils";
+import { getCurrentUser } from "@/lib/auth/current-user";
 import { getWorkspaceData } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
 
 export default async function InvestmentMemoPage({ params }: { params: Promise<{ id: string; memoId: string }> }) {
-  const data = await getWorkspaceData();
-  if (!data.user) return <SignInPanel data={data} />;
+  const user = await getCurrentUser();
+  if (!user) return <SignInPanel data={await getWorkspaceData()} />;
   const { id, memoId } = await params;
-  const memo = await getInvestmentMemo(prisma, data.user.id, memoId);
+  const memo = await getInvestmentMemo(prisma, user.id, memoId);
   if (!memo || memo.opportunityId !== id) notFound();
 
   return (

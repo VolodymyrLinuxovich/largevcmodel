@@ -35,8 +35,8 @@ export type RelationshipHealthInput = {
   now: Date;
   /** Interactions inside the lookback window. Future calendar meetings are allowed and treated as upcoming. */
   interactions: HealthInteraction[];
-  /** Lifetime aggregate for past direct interactions, when available beyond the lookback window. */
-  lifetime?: { directCount: number; firstAt: Date | null } | null;
+  /** Lifetime aggregate for past direct interactions, which may extend beyond the lookback window. */
+  lifetime?: { directCount: number; firstAt: Date | null; lastAt?: Date | null } | null;
   edges?: HealthEdge[];
   coverage: { gmailConnected: boolean; calendarConnected: boolean };
 };
@@ -77,6 +77,7 @@ export type RelationshipHealth = {
     priorCount: number;
     direction: "UP" | "FLAT" | "DOWN" | "UNKNOWN";
   };
+  /** recommendedAt is the actual due date (stable across recalculations); overdueDays > 0 when it has passed. */
   followUp: { recommendedAt: Date | null; overdueDays: number; reason: string };
   components: HealthComponent[];
   evidence: HealthEvidence[];
@@ -142,7 +143,10 @@ export function calculateRelationshipHealth(input: RelationshipHealthInput): Rel
   const imported = past.filter((item) => item.type === "CONTACT_IMPORTED");
   const edges = input.edges ?? [];
 
-  const last = direct[0] ?? null;
+  const lifetimeLast = input.lifetime?.lastAt && input.lifetime.lastAt <= now ? input.lifetime.lastAt : null;
+  // The newest direct interaction, which may predate the lookback window for long-standing relationships.
+  const last: HealthInteraction | null = direct[0] ?? (lifetimeLast ? { type: "EMAIL_SENT", occurredAt: lifetimeLast } : null);
+  const lastType = direct[0]?.type ?? null;
   const lifetimeDirect = Math.max(input.lifetime?.directCount ?? 0, direct.length);
   const windowFirst = direct.length ? direct[direct.length - 1]!.occurredAt : null;
   const firstAt =
@@ -161,11 +165,11 @@ export function calculateRelationshipHealth(input: RelationshipHealthInput): Rel
   const coverageNotes = coverageExplanation(input.coverage);
 
   const hasPastMeeting = meetings.length > 0;
-  if (direct.length === 0) {
-    insufficientReasons.push("No email or meeting interactions with this contact have been observed in the last two years.");
-  } else if (direct.length < params.minDirectInteractions && !hasPastMeeting) {
+  if (lifetimeDirect === 0) {
+    insufficientReasons.push("No email or meeting interactions with this contact have been observed.");
+  } else if (lifetimeDirect < params.minDirectInteractions && !hasPastMeeting) {
     insufficientReasons.push(
-      `Only ${plural(direct.length, "direct interaction")} observed; at least ${params.minDirectInteractions} emails or one meeting are required to assess health.`,
+      `Only ${plural(lifetimeDirect, "direct interaction")} observed in total; at least ${params.minDirectInteractions} emails or one meeting are required to assess health.`,
     );
   }
 
@@ -179,7 +183,7 @@ export function calculateRelationshipHealth(input: RelationshipHealthInput): Rel
       state: "INSUFFICIENT_DATA",
       score: null,
       lastInteractionAt: last?.occurredAt ?? null,
-      lastInteractionType: last?.type ?? null,
+      lastInteractionType: lastType,
       firstInteractionAt: firstAt,
       daysSinceLastInteraction: daysSince === null ? null : Math.floor(daysSince),
       upcomingMeetingAt,
@@ -219,7 +223,9 @@ export function calculateRelationshipHealth(input: RelationshipHealthInput): Rel
     recentCount > priorCount ? "UP" : recentCount < priorCount ? "DOWN" : "FLAT";
 
   explanation.push(
-    `Last direct interaction ${Math.floor(daysSince!)} days ago (${last!.type.replaceAll("_", " ").toLowerCase()} on ${isoDay(last!.occurredAt)}).`,
+    lastType
+      ? `Last direct interaction ${Math.floor(daysSince!)} days ago (${lastType.replaceAll("_", " ").toLowerCase()} on ${isoDay(last!.occurredAt)}).`
+      : `Last direct interaction ${Math.floor(daysSince!)} days ago (${isoDay(last!.occurredAt)}), outside the two-year detail window.`,
     `${plural(recentCount, "direct interaction")} in the last ${params.recentWindowDays} days versus ${priorCount} in the prior ${params.recentWindowDays} days.`,
   );
   if (sent.length || received.length) {
@@ -238,7 +244,7 @@ export function calculateRelationshipHealth(input: RelationshipHealthInput): Rel
     state,
     score,
     lastInteractionAt: last!.occurredAt,
-    lastInteractionType: last!.type,
+    lastInteractionType: lastType,
     firstInteractionAt: firstAt,
     daysSinceLastInteraction: Math.floor(daysSince!),
     upcomingMeetingAt,
@@ -424,9 +430,11 @@ function recommendFollowUp(input: {
     return { recommendedAt: null, overdueDays: 0, reason: `A meeting is already scheduled for ${isoDay(input.upcomingMeetingAt)}.` };
   }
   if (input.state === "DORMANT") {
+    // Due when the relationship crossed the dormancy threshold; a fixed date keeps snapshots stable.
+    const due = new Date(input.last.getTime() + params.dormantAfterDays * DAY_MS);
     return {
-      recommendedAt: input.now,
-      overdueDays: Math.floor(daysBetween(input.now, input.last) - params.dormantAfterDays),
+      recommendedAt: due,
+      overdueDays: Math.floor(daysBetween(input.now, due)),
       reason: "The relationship is dormant; re-engage if it is still relevant.",
     };
   }
@@ -444,7 +452,7 @@ function recommendFollowUp(input: {
   if (due <= input.now) {
     const overdueDays = Math.floor(daysBetween(input.now, due));
     return {
-      recommendedAt: input.now,
+      recommendedAt: due,
       overdueDays,
       reason: `Follow-up is ${overdueDays} days past ${cadenceText}.`,
     };

@@ -1,14 +1,17 @@
 import { defineConfig } from "vitest/config";
 import { fileURLToPath } from "node:url";
 
-const projectRoot = fileURLToPath(new URL(".", import.meta.url));
-
+/**
+ * PostgreSQL-backed integration tests. They require TEST_DATABASE_URL pointing at a disposable
+ * database whose schema matches prisma/schema.prisma (for example after `prisma db push`).
+ */
 export default defineConfig({
   test: {
     environment: "node",
-    include: ["tests/**/*.test.ts"],
-    // PostgreSQL-backed tests run separately via `npm run test:integration`.
-    exclude: ["tests/integration/**", "node_modules/**"],
+    include: ["tests/integration/**/*.int.test.ts"],
+    fileParallelism: false,
+    testTimeout: 30_000,
+    hookTimeout: 60_000,
   },
   resolve: {
     alias: {
@@ -16,5 +19,4 @@ export default defineConfig({
       "server-only": fileURLToPath(new URL("./tests/server-only-shim.ts", import.meta.url)),
     },
   },
-  root: projectRoot,
 });

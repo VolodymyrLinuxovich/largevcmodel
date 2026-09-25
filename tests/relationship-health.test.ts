@@ -106,7 +106,9 @@ describe("relationship health: scoring and decay", () => {
     expect(stale.state).toBe("DORMANT");
     expect(stale.score).not.toBeNull();
     expect(stale.score!).toBeLessThan(30);
-    expect(stale.followUp.recommendedAt).toEqual(NOW);
+    // Due when the relationship crossed the 180-day dormancy threshold, not "now".
+    expect(stale.followUp.recommendedAt).toEqual(daysAgo(390 - 180));
+    expect(stale.followUp.overdueDays).toBe(210);
     expect(unknown.state).toBe("INSUFFICIENT_DATA");
     expect(unknown.score).toBeNull();
   });
@@ -177,8 +179,43 @@ describe("relationship health: follow-up recommendations", () => {
   it("marks the follow-up as overdue when the cadence has elapsed", () => {
     const result = health([at("EMAIL_SENT", 40), at("EMAIL_RECEIVED", 55), at("EMAIL_SENT", 70)]);
 
-    expect(result.followUp.recommendedAt).toEqual(NOW);
+    expect(result.followUp.recommendedAt).toEqual(daysAgo(25));
     expect(result.followUp.overdueDays).toBe(25);
+  });
+
+  it("keeps an overdue due date stable across recalculations so snapshots are not rewritten", () => {
+    const interactions = [at("EMAIL_SENT", 400), at("EMAIL_RECEIVED", 395), at("CALENDAR_MEETING", 390)];
+    const today = health(interactions);
+    const tomorrow = calculateRelationshipHealth({ now: new Date(NOW.getTime() + DAY), interactions, coverage: connected });
+    const persisted = { id: "c", healthScore: today.score, healthState: today.state, nextFollowUpAt: today.followUp.recommendedAt };
+
+    expect(tomorrow.followUp.recommendedAt).toEqual(today.followUp.recommendedAt);
+    expect(tomorrow.followUp.overdueDays).toBe(today.followUp.overdueDays + 1);
+    expect(healthChanged(persisted, tomorrow)).toBe(false);
+  });
+});
+
+describe("relationship health: history beyond the detail window", () => {
+  it("assesses long-standing relationships from lifetime aggregates instead of reporting insufficient data", () => {
+    const result = health([at("EMAIL_RECEIVED", 5)], { lifetime: { directCount: 51, firstAt: daysAgo(1500), lastAt: daysAgo(5) } });
+
+    expect(result.state).not.toBe("INSUFFICIENT_DATA");
+    expect(result.score).not.toBeNull();
+  });
+
+  it("uses the lifetime last interaction when nothing falls inside the detail window", () => {
+    const result = health([], { lifetime: { directCount: 30, firstAt: daysAgo(2000), lastAt: daysAgo(900) } });
+
+    expect(result.state).toBe("DORMANT");
+    expect(result.lastInteractionAt).toEqual(daysAgo(900));
+    expect(result.lastInteractionType).toBeNull();
+    expect(result.explanation.join(" ")).toContain("outside the two-year detail window");
+  });
+
+  it("reports the lifetime count in the insufficient-data reason", () => {
+    const result = health([at("EMAIL_RECEIVED", 5)], { lifetime: { directCount: 1, firstAt: daysAgo(5), lastAt: daysAgo(5) } });
+
+    expect(result.insufficientReasons[0]).toContain("Only 1 direct interaction observed in total");
   });
 });
 

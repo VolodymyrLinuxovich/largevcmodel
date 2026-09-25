@@ -91,7 +91,7 @@ function OpportunityCard({ card, now }: { card: PipelineCard; now: Date }) {
       </dl>
       <div className="mt-3">
         {card.relationship.status === "ASSESSED" ? (
-          <HealthStateBadge state={card.relationship.state} score={card.relationship.score} />
+          <HealthStateBadge state={card.relationship.state} score={card.relationship.score} calculatedAt={card.relationship.calculatedAt} />
         ) : (
           <Badge variant="muted">{card.relationship.status === "NO_CONTACTS" ? "No people linked" : enumLabel(card.relationship.status)}</Badge>
         )}

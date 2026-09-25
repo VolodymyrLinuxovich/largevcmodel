@@ -5,14 +5,15 @@ import { ThesisForm } from "@/components/pipeline/thesis-form";
 import { listPipeline } from "@/lib/pipeline/queries";
 import { listTheses } from "@/lib/pipeline/thesis";
 import { prisma } from "@/lib/prisma";
+import { getCurrentUser } from "@/lib/auth/current-user";
 import { getWorkspaceData } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
 
 export default async function PipelinePage() {
-  const data = await getWorkspaceData();
-  if (!data.user) return <SignInPanel data={data} />;
-  const userId = data.user.id;
+  const user = await getCurrentUser();
+  if (!user) return <SignInPanel data={await getWorkspaceData()} />;
+  const userId = user.id;
   const [cards, theses, companies] = await Promise.all([
     listPipeline(prisma, userId),
     listTheses(prisma, userId),

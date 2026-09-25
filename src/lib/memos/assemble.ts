@@ -18,6 +18,7 @@ import {
   type WarmIntroduction,
 } from "@/lib/evidence/sections";
 import { EVIDENCE_CLASS_LABELS, type EvidenceClass, type EvidenceItem, type GeneratedItem, type KeyFact, type SourceRef } from "@/lib/evidence/types";
+import { phraseMatch } from "@/lib/domain/text-match";
 import { STAGE_LABELS } from "@/lib/pipeline/stages";
 
 export const IC_MEMO_VERSION = "ic-memo-v1";
@@ -78,8 +79,7 @@ export function compareWithThesis(bundle: EvidenceBundle): ThesisAlignment {
   const compare = (value: string | null, targets: string[]): AlignmentMatch => {
     if (!targets.length) return "NOT_DEFINED";
     if (!value) return "UNKNOWN";
-    const normalized = value.toLowerCase();
-    return targets.some((target) => normalized.includes(target.toLowerCase()) || target.toLowerCase().includes(normalized)) ? "MATCH" : "NO_MATCH";
+    return targets.some((target) => phraseMatch(value, target)) ? "MATCH" : "NO_MATCH";
   };
   const { company, thesis } = bundle;
   return {
@@ -90,7 +90,7 @@ export function compareWithThesis(bundle: EvidenceBundle): ThesisAlignment {
       { criterion: "Stage", companyValue: company.stage, thesisValues: thesis.stages, match: compare(company.stage, thesis.stages) },
       { criterion: "Geography", companyValue: company.geography, thesisValues: thesis.geographies, match: compare(company.geography, thesis.geographies) },
     ],
-    explanation: "Text comparison of user-provided company fields with thesis targets. Unknown company fields are reported as unknown, not as mismatches.",
+    explanation: "Whole-word comparison of user-provided company fields with thesis targets. Unknown company fields are reported as unknown, not as mismatches.",
   };
 }
 
@@ -156,7 +156,9 @@ export function assembleInvestmentMemo(bundle: EvidenceBundle): InvestmentMemoCo
   const executiveSummary = [
     `${bundle.company.name} is in ${STAGE_LABELS[bundle.opportunity.stage]} (since ${iso(bundle.opportunity.stageChangedAt)?.slice(0, 10)}).`,
     `Stored evidence: ${established.length} established ${established.length === 1 ? "item" : "items"}, ${unverified.length} unverified, ${inferences.length} AI ${inferences.length === 1 ? "inference" : "inferences"}, ${sources.length} cited ${sources.length === 1 ? "source" : "sources"}.`,
-    supported.length ? `Supported key facts: ${supported.join(", ")}.` : "No sensitive key fact (revenue, funding, valuation, headcount, traction, investors, customers) is supported by stored evidence.",
+    supported.length
+      ? `Key facts with attributable evidence (see the cited claims): ${supported.join(", ")}.`
+      : "No sensitive key fact (revenue, funding, valuation, headcount, traction, investors, customers) is addressed by attributable evidence.",
     ...(unsupported.length && supported.length ? [`Not established: ${unsupported.join(", ")}.`] : []),
     thesis.status === "SCORED"
       ? `Heuristic fit score ${thesis.overall}/100 (confidence ${thesis.confidence})${thesis.thesisName ? ` against "${thesis.thesisName}"` : ""}.`

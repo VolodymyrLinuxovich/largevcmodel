@@ -36,7 +36,12 @@ export async function audit(
         researchRunId: input.researchRunId ?? null,
       },
     });
-  } catch {
-    // Audit writes must not leak private provider payloads or block user-facing actions.
+  } catch (error) {
+    // Audit writes must not block user-facing actions, but failures are reported (without the
+    // event payload, which may contain private provider data).
+    console.error("Audit event could not be recorded", {
+      action: input.action,
+      error: error instanceof Error ? error.message : "Unknown audit failure",
+    });
   }
 }
