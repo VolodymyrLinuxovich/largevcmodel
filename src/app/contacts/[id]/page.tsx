@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { sourceDomain } from "@/lib/domain/sources";
 import { getContactRelationshipHealth } from "@/lib/domain/relationship-health-service";
 import { RelationshipHealthPanel } from "@/components/relationships/relationship-health-panel";
+import { WatchButton } from "@/components/watchlist/watch-button";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +27,10 @@ export default async function ContactProfilePage({ params }: { params: Promise<{
     },
   });
   if (!contact) notFound();
-  const health = await getContactRelationshipHealth(prisma, data.user.id, contact.id);
+  const [health, watchItem] = await Promise.all([
+    getContactRelationshipHealth(prisma, data.user.id, contact.id),
+    prisma.watchlistItem.findFirst({ where: { userId: data.user.id, contactId: contact.id }, select: { id: true } }),
+  ]);
 
   const sourceList = new Map<string, (typeof contact.sources)[number]>();
   contact.sources.forEach((source) => sourceList.set(source.id, source));
@@ -39,9 +43,12 @@ export default async function ContactProfilePage({ params }: { params: Promise<{
         title={contact.fullName ?? contact.primaryEmail ?? "Unnamed contact"}
         body={[contact.title, contact.organization].filter(Boolean).join(" / ") || "Role and organization unavailable from connected sources."}
         actions={
-          <ApiActionButton endpoint="/api/scoring" payload={{ contactId: contact.id }} variant="outline">
-            Calculate Score
-          </ApiActionButton>
+          <>
+            <WatchButton entityType="CONTACT" targetId={contact.id} itemId={watchItem?.id ?? null} label="contact" />
+            <ApiActionButton endpoint="/api/scoring" payload={{ contactId: contact.id }} variant="outline" refreshOnSuccess>
+              Calculate Score
+            </ApiActionButton>
+          </>
         }
       />
 

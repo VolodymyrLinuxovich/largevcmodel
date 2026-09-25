@@ -48,8 +48,17 @@ export function partitionClaims(items: EvidenceItem[]) {
   };
 }
 
+const GENERIC_CATEGORIES = /^(|other|general|misc|miscellaneous|research|unknown|uncategorized)$/i;
+
+/**
+ * Selects items by their stored category. Claim text is consulted only for uncategorized claims,
+ * so a keyword in one claim's wording cannot move it into an unrelated section.
+ */
 export function byCategory(items: EvidenceItem[], pattern: RegExp) {
-  return items.filter((item) => pattern.test(item.category ?? "") || pattern.test(item.text));
+  return items.filter((item) => {
+    const category = (item.category ?? "").trim();
+    return GENERIC_CATEGORIES.test(category) ? pattern.test(item.text) : pattern.test(category);
+  });
 }
 
 /** Sources cited by the given items, deduplicated, in first-citation order so numbering is stable. */

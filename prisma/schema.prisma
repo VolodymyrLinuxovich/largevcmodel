@@ -248,6 +248,29 @@ enum OpportunityEventType {
   CONTACT_LINKED
   CONTACT_UNLINKED
   SCORE_UPDATED
+  MEMO_GENERATED
+  MEMO_FINALIZED
+}
+
+enum InvestmentMemoStatus {
+  DRAFT
+  FINALIZED
+}
+
+enum WatchEntityType {
+  COMPANY
+  CONTACT
+  OPPORTUNITY
+}
+
+enum WatchSignalType {
+  NEW_RESEARCH_CLAIM
+  NEW_SOURCE
+  NEW_EMAIL
+  NEW_MEETING
+  RELATIONSHIP_HEALTH_CHANGED
+  OPPORTUNITY_STAGE_CHANGED
+  FIT_SCORE_CHANGED
 }
 
 enum EntityResolutionOutcome {
@@ -321,6 +344,9 @@ model User {
   opportunityContacts       OpportunityContact[]
   opportunityEvents         OpportunityEvent[]
   meetingBriefs             MeetingBrief[]
+  investmentMemos           InvestmentMemo[]
+  watchlistItems            WatchlistItem[]
+  watchSignals              WatchSignal[]
 }
 
 model Session {
@@ -373,25 +399,26 @@ model Integration {
 }
 
 model Company {
-  id            String          @id @default(cuid())
-  userId        String
-  name          String
-  domain        String?
-  website       String?
-  description   String?
-  sector        String?
-  stage         String?
-  geography     String?
-  businessModel String?
-  source        String          @default("user")
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
-  user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  contacts      Contact[]
-  claims        ResearchClaim[]
-  sources       Source[]
-  fitScores     FitScore[]
-  opportunities Opportunity[]
+  id             String          @id @default(cuid())
+  userId         String
+  name           String
+  domain         String?
+  website        String?
+  description    String?
+  sector         String?
+  stage          String?
+  geography      String?
+  businessModel  String?
+  source         String          @default("user")
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contacts       Contact[]
+  claims         ResearchClaim[]
+  sources        Source[]
+  fitScores      FitScore[]
+  opportunities  Opportunity[]
+  watchlistItems WatchlistItem[]
 
   @@unique([userId, name])
   @@index([userId, domain])
@@ -442,6 +469,7 @@ model Contact {
   healthSnapshots               RelationshipHealthSnapshot[]
   opportunityLinks              OpportunityContact[]
   introducedOpportunities       Opportunity[]
+  watchlistItems                WatchlistItem[]
 
   @@unique([userId, source, providerId])
   @@unique([userId, primaryEmail])
@@ -774,6 +802,8 @@ model Opportunity {
   contacts              OpportunityContact[]
   events                OpportunityEvent[]
   meetingBriefs         MeetingBrief[]
+  investmentMemos       InvestmentMemo[]
+  watchlistItems        WatchlistItem[]
 
   @@index([userId, stage, updatedAt])
   @@index([userId, nextActionAt])
@@ -1649,4 +1679,77 @@ model MeetingBrief {
 
   @@index([userId, generatedAt])
   @@index([opportunityId, generatedAt])
+}
+
+/// Versioned IC memo snapshot. It organizes stored evidence for human judgment and never contains
+/// an investment recommendation. Finalized memos are immutable.
+model InvestmentMemo {
+  id             String               @id @default(cuid())
+  userId         String
+  opportunityId  String
+  version        Int
+  status         InvestmentMemoStatus @default(DRAFT)
+  title          String
+  content        Json
+  contentVersion String
+  claimCount     Int                  @default(0)
+  sourceCount    Int                  @default(0)
+  reviewerNotes  String?
+  generatedAt    DateTime             @default(now())
+  finalizedAt    DateTime?
+  finalizedBy    String?
+  user           User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  opportunity    Opportunity          @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+
+  @@unique([opportunityId, version])
+  @@index([userId, generatedAt])
+}
+
+/// A company, contact or opportunity the user wants change signals for. Exactly one target is set
+/// (enforced by a CHECK constraint in the migration and by the service layer).
+model WatchlistItem {
+  id            String          @id @default(cuid())
+  userId        String
+  entityType    WatchEntityType
+  companyId     String?
+  contactId     String?
+  opportunityId String?
+  note          String?
+  /// Signals are derived only from records LargeVCModel learned about after this time.
+  lastCheckedAt DateTime        @default(now())
+  createdAt     DateTime        @default(now())
+  user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company       Company?        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  contact       Contact?        @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  opportunity   Opportunity?    @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  signals       WatchSignal[]
+
+  @@unique([userId, companyId])
+  @@unique([userId, contactId])
+  @@unique([userId, opportunityId])
+  @@index([userId, createdAt])
+}
+
+/// A change derived from data already stored in LargeVCModel. dedupeKey makes detection idempotent.
+model WatchSignal {
+  id               String          @id @default(cuid())
+  userId           String
+  watchlistItemId  String
+  type             WatchSignalType
+  title            String
+  detail           String?
+  provenance       String
+  sourceRecordType String
+  sourceRecordId   String
+  occurredAt       DateTime
+  detectedAt       DateTime        @default(now())
+  readAt           DateTime?
+  dedupeKey        String
+  metadata         Json?
+  user             User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  watchlistItem    WatchlistItem   @relation(fields: [watchlistItemId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, dedupeKey])
+  @@index([userId, readAt, detectedAt])
+  @@index([watchlistItemId, detectedAt])
 }
