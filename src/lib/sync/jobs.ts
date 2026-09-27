@@ -31,28 +31,54 @@ function gmailQuery(cursor: Prisma.JsonValue | null | undefined) {
   return typeof value === "string" ? value : undefined;
 }
 
+async function findOrCreateSyncJob(
+  prisma: PrismaClient,
+  input: { userId: string; provider: SyncProvider },
+) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      const job = await prisma.$transaction(
+        async (tx) => {
+          const existing = await tx.syncJob.findFirst({
+            where: {
+              userId: input.userId,
+              provider: input.provider,
+              status: { in: [SyncJobStatus.PENDING, SyncJobStatus.RUNNING] },
+            },
+            orderBy: { createdAt: "desc" },
+          });
+          if (existing) return { job: existing, created: false };
+
+          return {
+            job: await tx.syncJob.create({
+              data: {
+                userId: input.userId,
+                provider: input.provider,
+                status: SyncJobStatus.PENDING,
+              },
+            }),
+            created: true,
+          };
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      );
+      return job;
+    } catch (error) {
+      // Concurrent serializable transactions can conflict after both observe no active job.
+      // Retrying lets the winner commit and the loser read the existing row.
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034" && attempt < 3) continue;
+      throw error;
+    }
+  }
+}
+
 export async function queueSyncJob(
   prisma: PrismaClient,
   input: { userId: string; service: IntegrationService; actor: string },
 ) {
   const provider = serviceToProvider[input.service];
-  const existing = await prisma.syncJob.findFirst({
-    where: {
-      userId: input.userId,
-      provider,
-      status: { in: [SyncJobStatus.PENDING, SyncJobStatus.RUNNING] },
-    },
-    orderBy: { createdAt: "desc" },
-  });
-  if (existing) return existing;
-
-  const job = await prisma.syncJob.create({
-    data: {
-      userId: input.userId,
-      provider,
-      status: SyncJobStatus.PENDING,
-    },
-  });
+  const { job, created } = await findOrCreateSyncJob(prisma, { userId: input.userId, provider });
+  if (!created) return job;
 
   await prisma.integration.updateMany({
     where: { userId: input.userId, provider: "google", service: input.service, status: IntegrationStatus.CONNECTED },
