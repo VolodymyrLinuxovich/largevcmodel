@@ -1,6 +1,7 @@
 # LargeVCModel
 
 [![CI](https://github.com/VolodymyrLinuxovich/largevcmodel/actions/workflows/ci.yml/badge.svg)](https://github.com/VolodymyrLinuxovich/largevcmodel/actions/workflows/ci.yml)
+[![GitHub stars](https://img.shields.io/github/stars/VolodymyrLinuxovich/largevcmodel?style=flat)](https://github.com/VolodymyrLinuxovich/largevcmodel/stargazers)
 
 LargeVCModel is a Next.js and PostgreSQL application for investors to search contacts and email history, research companies and people, score opportunities against an investment thesis, and prepare outreach. It connects Gmail, Google Contacts, Google Calendar, research providers, and an audit trail in one application.
 
