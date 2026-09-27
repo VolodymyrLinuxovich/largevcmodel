@@ -59,6 +59,12 @@ function gmailThreadUrl(threadId: string) {
   return `https://mail.google.com/mail/u/0/#all/${threadId}`;
 }
 
+export function latestMessageDate(current: Date | null | undefined, incoming: Date | null | undefined) {
+  if (!current) return incoming ?? null;
+  if (!incoming) return current;
+  return current >= incoming ? current : incoming;
+}
+
 function base64Url(value: string) {
   return Buffer.from(value).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
@@ -122,6 +128,10 @@ export async function syncGmail(
       const existingMessage = await prisma.gmailMessage.findFirst({
         where: { providerMessageId: message.id, thread: { userId } },
         select: { id: true },
+      });
+      const existingThread = await prisma.gmailThread.findUnique({
+        where: { userId_providerThreadId: { userId, providerThreadId: message.threadId } },
+        select: { lastMessageAt: true },
       });
       let contactId: string | undefined;
       if (contactEmail) {
@@ -227,7 +237,10 @@ export async function syncGmail(
           hasUserReply: direction === "sent" ? true : undefined,
           labels: message.labelIds ?? [],
           messageCount: existingMessage ? undefined : { increment: 1 },
-          lastMessageAt: message.internalDate ? new Date(Number(message.internalDate)) : undefined,
+          lastMessageAt: latestMessageDate(
+            existingThread?.lastMessageAt,
+            message.internalDate ? new Date(Number(message.internalDate)) : null,
+          ),
         },
       });
 
