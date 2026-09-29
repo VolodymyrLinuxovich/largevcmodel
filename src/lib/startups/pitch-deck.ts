@@ -329,6 +329,20 @@ function currentStartupValue(startup: Record<string, unknown>, fieldKey: string)
 
 function valueForStartupField(fieldKey: string, value: string) {
   if (arrayFields.has(fieldKey)) return value.split(",").map((item) => item.trim()).filter(Boolean);
-  if (numberFields.has(fieldKey)) return Number(value.replace(/[^0-9]/g, "")) || null;
+  if (numberFields.has(fieldKey)) return parseStartupNumber(value);
   return value.trim() || null;
+}
+
+const MAX_INT_COLUMN = 2_147_483_647;
+
+// Reads the first amount in values like "$3M to scale pilots", "$2.5M", "500K" or "$1,500,000".
+function parseStartupNumber(value: string) {
+  const match = value.match(/([0-9][0-9,]*(?:\.[0-9]+)?)\s*(k|thousand|mm|m|million|bn|b|billion)?\b/i);
+  if (!match) return null;
+  const number = Number(match[1].replace(/,/g, ""));
+  const unit = (match[2] ?? "").toLowerCase();
+  const multiplier =
+    unit === "k" || unit === "thousand" ? 1_000 : unit === "b" || unit === "bn" || unit === "billion" ? 1_000_000_000 : unit ? 1_000_000 : 1;
+  const amount = Math.round(number * multiplier);
+  return Number.isSafeInteger(amount) && amount > 0 && amount <= MAX_INT_COLUMN ? amount : null;
 }
