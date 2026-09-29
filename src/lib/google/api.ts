@@ -89,8 +89,9 @@ export async function revokeIntegration(prisma: PrismaClient, userId: string, in
     await revokeGoogleToken(decryptSecret(encryptedToken));
   }
 
-  await prisma.integration.update({
-    where: { id: integration.id },
+  // Google revokes the whole OAuth grant, so every Google integration of this user loses access with it.
+  await prisma.integration.updateMany({
+    where: { userId, provider: "google", status: { not: IntegrationStatus.REVOKED } },
     data: {
       status: IntegrationStatus.REVOKED,
       accessTokenCiphertext: null,

@@ -101,9 +101,11 @@ export async function revokeGoogleToken(token: string) {
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ token }),
   });
-  if (!response.ok) {
-    throw new Error(`Google token revocation failed: ${response.status} ${await response.text()}`);
-  }
+  if (response.ok) return;
+  const body = await response.text();
+  // Google answers 400 invalid_token when the grant is already revoked; the token is unusable either way.
+  if (response.status === 400 && body.includes("invalid_token")) return;
+  throw new Error(`Google token revocation failed: ${response.status} ${body}`);
 }
 
 export async function fetchGoogleUserInfo(accessToken: string): Promise<GoogleUserInfo> {
