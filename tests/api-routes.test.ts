@@ -97,6 +97,32 @@ describe("API authentication and error mapping", () => {
     expect(findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "foreign", userId: "user-1" } }));
   });
 
+  it("does not book a calendar event for another user's contact", async () => {
+    const findFirst = vi.fn().mockResolvedValue(null);
+    const create = vi.fn();
+    db.prisma.contact = { findFirst };
+    db.prisma.calendarEvent = { create };
+    const google = await import("@/lib/google/calendar");
+    const createGoogleEvent = vi.spyOn(google, "createGoogleCalendarEvent");
+    const { POST } = await import("@/app/api/calendar/book/route");
+    const response = await POST(
+      jsonRequest("/api/calendar/book", {
+        contactId: "foreign",
+        summary: "Intro call",
+        attendees: ["founder@example.com"],
+        startsAt: "2026-10-01T16:00:00.000Z",
+        endsAt: "2026-10-01T16:30:00.000Z",
+        confirmCreate: true,
+      }),
+    );
+
+    expect(response.status).toBe(404);
+    expect(findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "foreign", userId: "user-1" } }));
+    expect(createGoogleEvent).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+    createGoogleEvent.mockRestore();
+  });
+
   it("does not leak database error details", async () => {
     const error = new Prisma.PrismaClientKnownRequestError('Invalid `prisma.opportunity.findMany()` column "secret_column" does not exist', {
       code: "P2022",

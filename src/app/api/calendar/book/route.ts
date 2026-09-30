@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { audit } from "@/lib/audit";
 import { requireCurrentUser } from "@/lib/auth/current-user";
-import { badRequest, ok, serverError } from "@/lib/api/respond";
+import { badRequest, notFound, ok, serverError } from "@/lib/api/respond";
 import { createGoogleCalendarEvent } from "@/lib/google/calendar";
 import { prisma } from "@/lib/prisma";
 
@@ -21,6 +21,10 @@ export async function POST(request: Request) {
     const user = await requireCurrentUser();
     const parsed = requestSchema.safeParse(await request.json());
     if (!parsed.success) return badRequest("Explicit calendar confirmation is required", parsed.error.flatten());
+    if (parsed.data.contactId) {
+      const contact = await prisma.contact.findFirst({ where: { id: parsed.data.contactId, userId: user.id } });
+      if (!contact) return notFound("Contact not found");
+    }
     const event = await createGoogleCalendarEvent(prisma, user.id, parsed.data);
     const stored = await prisma.calendarEvent.create({
       data: {
