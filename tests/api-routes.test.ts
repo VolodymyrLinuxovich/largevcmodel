@@ -97,6 +97,25 @@ describe("API authentication and error mapping", () => {
     expect(findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "foreign", userId: "user-1" } }));
   });
 
+  it("does not attach an ingested reply to another user's contact or draft", async () => {
+    const contactFindFirst = vi.fn().mockResolvedValue(null);
+    const draftFindFirst = vi.fn().mockResolvedValue(null);
+    const create = vi.fn();
+    db.prisma.contact = { findFirst: contactFindFirst };
+    db.prisma.outreachDraft = { findFirst: draftFindFirst, updateMany: vi.fn() };
+    db.prisma.reply = { create };
+    const { POST } = await import("@/app/api/replies/ingest/route");
+
+    const foreignContact = await POST(jsonRequest("/api/replies/ingest", { contactId: "foreign", bodySnippet: "Happy to meet." }));
+    expect(foreignContact.status).toBe(404);
+    expect(contactFindFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "foreign", userId: "user-1" } }));
+
+    const foreignDraft = await POST(jsonRequest("/api/replies/ingest", { draftId: "foreign", bodySnippet: "Happy to meet." }));
+    expect(foreignDraft.status).toBe(404);
+    expect(draftFindFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "foreign", userId: "user-1" } }));
+    expect(create).not.toHaveBeenCalled();
+  });
+
   it("does not leak database error details", async () => {
     const error = new Prisma.PrismaClientKnownRequestError('Invalid `prisma.opportunity.findMany()` column "secret_column" does not exist', {
       code: "P2022",
