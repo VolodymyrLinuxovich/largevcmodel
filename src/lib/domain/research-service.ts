@@ -100,6 +100,10 @@ export async function researchSubject(prisma: PrismaClient, userId: string, inpu
       geography: company?.geography,
     });
 
+    // Provider output is untrusted: link everything to the subject that was looked up for this user,
+    // never to contact or company ids the provider echoes back.
+    const subjectContactId = contact?.id ?? null;
+    const subjectCompanyId = contact?.companyId ?? company?.id ?? null;
     const sources = await Promise.all(
       dedupeSources(result.sources).map(async (source) => {
         const canonicalUrl = canonicalizeUrl(source.url);
@@ -107,8 +111,8 @@ export async function researchSubject(prisma: PrismaClient, userId: string, inpu
           where: { userId_canonicalUrl: { userId, canonicalUrl } },
           create: {
             userId,
-            contactId: source.contactId ?? contact?.id ?? null,
-            companyId: source.companyId ?? contact?.companyId ?? company?.id ?? null,
+            contactId: subjectContactId,
+            companyId: subjectCompanyId,
             title: source.title,
             url: source.url,
             canonicalUrl,
@@ -141,8 +145,8 @@ export async function researchSubject(prisma: PrismaClient, userId: string, inpu
         data: {
           userId,
           researchRunId: run.id,
-          contactId: claim.contactId ?? contact?.id ?? null,
-          companyId: claim.companyId ?? contact?.companyId ?? company?.id ?? null,
+          contactId: subjectContactId,
+          companyId: subjectCompanyId,
           text: claim.text,
           category: claim.category,
           provenance: claimProvenance(claim.provenance),
