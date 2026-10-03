@@ -217,7 +217,8 @@ export async function researchSubject(prisma: PrismaClient, userId: string, inpu
 export async function scoreContact(prisma: PrismaClient, userId: string, contactId: string) {
   const contact = await prisma.contact.findFirst({
     where: { id: contactId, userId },
-    include: { company: true, claims: true, sources: true },
+    // Only claims backed by at least one source count as evidence, as in opportunity scoring.
+    include: { company: true, claims: { where: { sources: { some: {} } } }, sources: true },
   });
   if (!contact) throw new Error("Contact not found");
 
