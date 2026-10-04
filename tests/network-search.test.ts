@@ -124,6 +124,24 @@ describe("general network search", () => {
     expect(parseNetworkObjective({ query: "seed founders in the us", strictness: "balanced" }).geographies).toContain("us");
   });
 
+  it("matches roles and geographies in candidate text as whole words", () => {
+    const parsed = parseNetworkObjective({ query: "Find investors in the us", strictness: "balanced" }, now);
+    const [result] = rankNetworkCandidates(parsed, [
+      candidate({
+        id: "person:partnerships",
+        entityType: "PERSON",
+        title: "Partnerships lead",
+        subtitle: "Head of partnerships, Berlin",
+        text: "Head of partnerships at a Munich bank",
+      }),
+      candidate({ id: "person:vc", entityType: "PERSON", title: "VC partner", subtitle: "Partner, US venture firm", text: "Partners with US founders" }),
+    ]);
+    expect(result.id).toBe("person:vc");
+    expect(result.whyMatched).toContain("role");
+    expect(result.whyMatched).toContain("geography");
+    expect(rankNetworkCandidates(parsed, [candidate({ id: "person:partnerships", entityType: "PERSON", title: "Partnerships lead", text: "Head of partnerships at a Munich bank" })])).toHaveLength(0);
+  });
+
   it("handles geographic searches without swapped sector/geography filters", () => {
     const parsed = parseNetworkObjective({ query: "Find people in Europe working on robotics", sector: "Ukraine", strictness: "balanced" }, now);
     expect(parsed.geographies).toEqual(expect.arrayContaining(["Ukraine", "europe"]));
