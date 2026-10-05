@@ -148,6 +148,30 @@ describe("general network search", () => {
     expect(parsed.topics).not.toContain("Ukraine");
   });
 
+  it("does not turn prepositions and date phrases into topics or geographies", () => {
+    const parsed = parseNetworkObjective({ query: "Find founders I met in the last six months", strictness: "balanced" }, now);
+    expect(parsed.geographies).toEqual([]);
+    expect(parsed.topics).not.toContain("in");
+    expect(parsed.positiveKeywords).not.toContain("in");
+    expect(parsed.dateRange?.preset).toBe("6 months");
+
+    const year = parseNetworkObjective({ query: "people I emailed in 2024 about climate", strictness: "balanced" }, now);
+    expect(year.geographies).toEqual([]);
+
+    const place = parseNetworkObjective({ query: "AI founders in the Bay Area", strictness: "balanced" }, now);
+    expect(place.geographies).toContain("bay area");
+
+    const results = search("Find founders I met in the last six months", [
+      candidate({
+        id: "person:other-teams",
+        entityType: "PERSON",
+        title: "Founder",
+        text: "founder building tools for other teams",
+      }),
+    ]);
+    expect(results[0].evidence.some((item) => item.criterion === "Geography")).toBe(false);
+  });
+
   it("supports recency and no-follow-up conditions", () => {
     const results = search("Find founders I met but never followed up with", [
       candidate({
