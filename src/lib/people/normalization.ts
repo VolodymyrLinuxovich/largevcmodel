@@ -140,20 +140,24 @@ export async function persistProviderOrganization(
 ) {
   const organization = normalizeProviderOrganization(input);
   if (!organization) return null;
-  const existing =
+  const byProvider =
     organization.providerOrgId
       ? await prisma.discoveredOrganization.findUnique({
           where: { userId_provider_providerOrgId: { userId, provider, providerOrgId: organization.providerOrgId } },
         })
-      : await prisma.discoveredOrganization.findFirst({
-          where: {
-            userId,
-            OR: [
-              organization.domain ? { domain: organization.domain } : undefined,
-              { name: { equals: organization.name, mode: "insensitive" } },
-            ].filter(Boolean) as Prisma.DiscoveredOrganizationWhereInput[],
-          },
-        });
+      : null;
+  // A new provider id still has to match firms saved earlier without an id or by another provider.
+  const existing =
+    byProvider ??
+    (await prisma.discoveredOrganization.findFirst({
+      where: {
+        userId,
+        OR: [
+          organization.domain ? { domain: organization.domain } : undefined,
+          { name: { equals: organization.name, mode: "insensitive" } },
+        ].filter(Boolean) as Prisma.DiscoveredOrganizationWhereInput[],
+      },
+    }));
 
   const data = {
     provider,
