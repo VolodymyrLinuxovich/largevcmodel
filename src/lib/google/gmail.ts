@@ -33,10 +33,36 @@ function emailFromHeader(value?: string | null) {
   return (match?.[1] ?? value).split(",")[0]?.trim().toLowerCase() || null;
 }
 
-function emailsFromHeader(value?: string | null) {
+// Split an address list on commas that are outside quotes and angle brackets.
+export function splitAddressList(value: string) {
+  const parts: string[] = [];
+  let current = "";
+  let inQuotes = false;
+  let inAngle = false;
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    if (char === "\\" && inQuotes && index + 1 < value.length) {
+      current += char + value[index + 1];
+      index += 1;
+      continue;
+    }
+    if (char === '"' && !inAngle) inQuotes = !inQuotes;
+    else if (char === "<" && !inQuotes) inAngle = true;
+    else if (char === ">" && !inQuotes) inAngle = false;
+    if (char === "," && !inQuotes && !inAngle) {
+      parts.push(current);
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+  parts.push(current);
+  return parts.map((part) => part.trim()).filter(Boolean);
+}
+
+export function emailsFromHeader(value?: string | null) {
   if (!value) return [];
-  return value
-    .split(",")
+  return splitAddressList(value)
     .map((part) => emailFromHeader(part))
     .filter(Boolean) as string[];
 }
