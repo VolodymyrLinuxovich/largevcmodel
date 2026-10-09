@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "@prisma/client";
 import { addWatchSchema, markSignalsReadSchema } from "@/lib/watchlist/schemas";
 import { addToWatchlist, refreshWatchSignals } from "@/lib/watchlist/service";
@@ -162,5 +162,50 @@ describe("watchlist service", () => {
 
     expect(await refreshWatchSignals(prisma, "user-1")).toEqual({ checked: 0, created: 0 });
     expect(calls).toEqual(["items"]);
+  });
+
+  it("never moves an item's checkpoint back when another item's backlog is truncated", async () => {
+    const watchedEarly = new Date("2026-01-01T00:00:00Z");
+    const watchedToday = new Date("2026-09-28T00:00:00Z");
+    const items = [
+      { id: "w-busy", entityType: "COMPANY", companyId: "co-busy", contactId: null, opportunityId: null, opportunity: null, lastCheckedAt: watchedEarly },
+      { id: "w-new", entityType: "COMPANY", companyId: "co-new", contactId: null, opportunityId: null, opportunity: null, lastCheckedAt: watchedToday },
+    ];
+    const claim = (id: string, companyId: string, createdAt: Date) => ({
+      id, companyId, contactId: null, text: id, provenance: "USER_PROVIDED", createdAt, _count: { sources: 1 },
+    });
+    const backlog = Array.from({ length: 500 }, (_, index) => claim(`busy-${index}`, "co-busy", new Date(watchedEarly.getTime() + (index + 1) * 60_000)));
+    // Stored before w-new was watched, so it must never become a "new" signal for it.
+    const preexisting = claim("claim-old", "co-new", new Date("2026-06-01T00:00:00Z"));
+    const inserted: Array<{ dedupeKey: string }> = [];
+    const prisma = {
+      watchlistItem: {
+        findMany: async () => items,
+        updateMany: ({ where, data }: { where: { lastCheckedAt?: { lt: Date } }; data: { lastCheckedAt: Date } }) => {
+          for (const item of items) {
+            if (!where.lastCheckedAt || item.lastCheckedAt < where.lastCheckedAt.lt) item.lastCheckedAt = data.lastCheckedAt;
+          }
+        },
+      },
+      researchClaim: {
+        findMany: async ({ where }: { where: { createdAt: { gt: Date } } }) =>
+          [...backlog, preexisting].filter((record) => record.createdAt > where.createdAt.gt).sort((a, b) => +a.createdAt - +b.createdAt).slice(0, 500),
+      },
+      source: { findMany: async () => [] },
+      opportunityEvent: { findMany: async () => [] },
+      fitScore: { findMany: async () => [] },
+      watchSignal: {
+        createMany: ({ data }: { data: Array<{ dedupeKey: string }> }) => (inserted.push(...data), { count: data.length }),
+      },
+      $transaction: async (operations: unknown[]) => Promise.all(operations),
+      auditEvent: { create: vi.fn() },
+    } as unknown as PrismaClient;
+
+    const now = new Date("2026-09-28T12:00:00Z");
+    await refreshWatchSignals(prisma, "user-1", now);
+    await refreshWatchSignals(prisma, "user-1", now);
+
+    expect(items[1].lastCheckedAt.getTime()).toBeGreaterThanOrEqual(watchedToday.getTime());
+    expect(inserted.filter((signal) => signal.dedupeKey.startsWith("w-new:"))).toEqual([]);
   });
 });

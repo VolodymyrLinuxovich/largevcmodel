@@ -220,7 +220,11 @@ export async function refreshWatchSignals(prisma: PrismaClient, userId: string, 
       data: candidates.map((candidate) => ({ ...candidate, userId, metadata: candidate.metadata as Prisma.InputJsonObject })),
       skipDuplicates: true,
     }),
-    prisma.watchlistItem.updateMany({ where: { userId, id: { in: items.map((item) => item.id) } }, data: { lastCheckedAt: checkpoint } }),
+    // Only move checkpoints forward: a truncated backlog for one item must not re-expose older records to the others.
+    prisma.watchlistItem.updateMany({
+      where: { userId, id: { in: items.map((item) => item.id) }, lastCheckedAt: { lt: checkpoint } },
+      data: { lastCheckedAt: checkpoint },
+    }),
   ]);
 
   await audit(prisma, {
