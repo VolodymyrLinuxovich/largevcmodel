@@ -187,7 +187,8 @@ export async function refreshWatchSignals(prisma: PrismaClient, userId: string, 
       : [],
     companyIds.length
       ? prisma.fitScore.findMany({
-          where: { userId, companyId: { in: companyIds } },
+          // Research also stores per contact scores under the contact's company. Compare company scores only.
+          where: { userId, companyId: { in: companyIds }, contactId: null },
           take: RECORD_LIMIT,
           orderBy: { calculatedAt: "desc" },
           select: { id: true, companyId: true, overall: true, confidence: true, modelOrProvider: true, calculatedAt: true },

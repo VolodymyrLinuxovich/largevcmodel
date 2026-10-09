@@ -208,4 +208,34 @@ describe("watchlist service", () => {
     expect(items[1].lastCheckedAt.getTime()).toBeGreaterThanOrEqual(watchedToday.getTime());
     expect(inserted.filter((signal) => signal.dedupeKey.startsWith("w-new:"))).toEqual([]);
   });
+
+  it("compares company fit scores only and ignores per contact scores", async () => {
+    const items = [
+      { id: "w-co", entityType: "COMPANY", companyId: "co-1", contactId: null, opportunityId: null, opportunity: null, lastCheckedAt: SINCE },
+    ];
+    const scores = [
+      { id: "fit-company", companyId: "co-1", contactId: null, overall: 80, confidence: 70, modelOrProvider: "pipeline", calculatedAt: after },
+      { id: "fit-contact", companyId: "co-1", contactId: "ct-9", overall: 40, confidence: 60, modelOrProvider: "research", calculatedAt: later },
+    ];
+    const inserted: Array<{ type: string }> = [];
+    const prisma = {
+      watchlistItem: { findMany: async () => items, updateMany: async () => ({ count: 1 }) },
+      researchClaim: { findMany: async () => [] },
+      source: { findMany: async () => [] },
+      opportunityEvent: { findMany: async () => [] },
+      fitScore: {
+        findMany: async ({ where }: { where: { contactId?: string | null } }) =>
+          scores.filter((score) => !("contactId" in where) || score.contactId === where.contactId),
+      },
+      watchSignal: {
+        createMany: ({ data }: { data: Array<{ type: string }> }) => (inserted.push(...data), { count: data.length }),
+      },
+      $transaction: async (operations: unknown[]) => Promise.all(operations),
+      auditEvent: { create: vi.fn() },
+    } as unknown as PrismaClient;
+
+    await refreshWatchSignals(prisma, "user-1", new Date("2026-09-04T00:00:00Z"));
+
+    expect(inserted.filter((signal) => signal.type === "FIT_SCORE_CHANGED")).toEqual([]);
+  });
 });
