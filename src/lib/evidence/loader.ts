@@ -114,6 +114,32 @@ function criteriaRecord(value: unknown): Record<string, number | null> {
 
 const meetingSelect = { id: true, title: true, startsAt: true, endsAt: true, attendees: true, htmlLink: true, contactId: true } as const;
 
+export const PAST_MEETING_LIMIT = 25;
+export const UPCOMING_MEETING_LIMIT = 15;
+
+/**
+ * Past and upcoming meetings are loaded with separate limits. Calendar sync expands recurring
+ * meetings ahead of time, so one newest first query can be filled by future events alone.
+ */
+export async function loadBundleMeetings(prisma: PrismaClient, userId: string, meetingFilter: object[], now: Date) {
+  if (!meetingFilter.length) return [];
+  const [past, upcoming] = await Promise.all([
+    prisma.calendarEvent.findMany({
+      where: { userId, OR: meetingFilter, startsAt: { lte: now } },
+      orderBy: { startsAt: "desc" },
+      take: PAST_MEETING_LIMIT,
+      select: meetingSelect,
+    }),
+    prisma.calendarEvent.findMany({
+      where: { userId, OR: meetingFilter, startsAt: { gt: now } },
+      orderBy: { startsAt: "asc" },
+      take: UPCOMING_MEETING_LIMIT,
+      select: meetingSelect,
+    }),
+  ]);
+  return [...upcoming.reverse(), ...past];
+}
+
 /**
  * Loads everything a brief or memo may cite for one opportunity, in a fixed number of queries.
  * Every query is filtered by userId; a foreign opportunity or calendar event yields a 404.
@@ -192,9 +218,7 @@ export async function loadOpportunityEvidence(
           },
         })
       : [],
-    meetingFilter.length
-      ? prisma.calendarEvent.findMany({ where: { userId, OR: meetingFilter }, orderBy: { startsAt: "desc" }, take: 40, select: meetingSelect })
-      : [],
+    loadBundleMeetings(prisma, userId, meetingFilter, now),
     contactIds.length
       ? prisma.relationshipEdge.findMany({
           // Only edges from the user to the linked contacts count as the user's own relationship evidence.
