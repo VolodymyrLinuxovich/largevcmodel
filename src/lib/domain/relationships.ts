@@ -2,9 +2,9 @@ import "server-only";
 
 import { ContactInteractionType, PrismaClient } from "@prisma/client";
 
-function recencyPoints(lastInteractionAt: Date | null) {
+function recencyPoints(lastInteractionAt: Date | null, now: Date) {
   if (!lastInteractionAt) return 0;
-  const ageDays = (Date.now() - lastInteractionAt.getTime()) / 86_400_000;
+  const ageDays = (now.getTime() - lastInteractionAt.getTime()) / 86_400_000;
   if (ageDays <= 14) return 25;
   if (ageDays <= 45) return 18;
   if (ageDays <= 90) return 12;
@@ -39,16 +39,18 @@ export async function recalculateRelationshipStrength(
   prisma: PrismaClient,
   userId: string,
   contactId: string,
+  now = new Date(),
 ) {
   const [contact, interactionCounts, upcomingMeetings] = await Promise.all([
     prisma.contact.findFirst({ where: { id: contactId, userId }, select: { lastInteractionAt: true } }),
     prisma.contactInteraction.groupBy({
       by: ["type"],
-      where: { userId, contactId },
+      // Calendar sync stores future meetings too. Those count only as upcoming meetings below.
+      where: { userId, contactId, occurredAt: { lte: now } },
       _count: { id: true },
     }),
     prisma.calendarEvent.count({
-      where: { userId, contactId, startsAt: { gte: new Date() } },
+      where: { userId, contactId, startsAt: { gt: now } },
     }),
   ]);
 
@@ -64,7 +66,7 @@ export async function recalculateRelationshipStrength(
   const frequency = Math.min(25, sent * 2 + received * 3);
   const meetingScore = Math.min(25, meetings * 8 + upcomingMeetings * 10);
   const sourceScore = imported ? 5 : 0;
-  const overall = Math.max(0, Math.min(100, recencyPoints(contact.lastInteractionAt) + frequency + meetingScore + sourceScore));
+  const overall = Math.max(0, Math.min(100, recencyPoints(contact.lastInteractionAt, now) + frequency + meetingScore + sourceScore));
 
   await prisma.contact.update({
     where: { id: contactId },
