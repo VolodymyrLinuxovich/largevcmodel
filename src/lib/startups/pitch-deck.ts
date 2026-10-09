@@ -196,12 +196,13 @@ export async function runPitchDeckExtraction(prisma: PrismaClient, userId: strin
   }
 }
 
-export async function mergePitchDeckExtraction(prisma: PrismaClient, userId: string, input: ExtractionMergeInput) {
+/** Returns null when the extraction is not the caller's or belongs to another startup; nothing is written then. */
+export async function mergePitchDeckExtraction(prisma: PrismaClient, userId: string, startupId: string, input: ExtractionMergeInput) {
   const extraction = await prisma.pitchDeckExtraction.findFirst({
-    where: { id: input.extractionId, userId },
+    where: { id: input.extractionId, userId, startupId },
     include: { fields: true, startup: true, pitchDeck: true },
   });
-  if (!extraction) throw new Error("Pitch deck extraction not found.");
+  if (!extraction) return null;
 
   const updates: Record<string, unknown> = {};
   const fieldById = new Map(extraction.fields.map((field) => [field.id, field]));

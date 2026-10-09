@@ -14,6 +14,9 @@ export async function POST(request: Request) {
     if (!body.success) return badRequest("Invalid approval request", body.error.flatten());
     const existing = await prisma.outreachDraft.findFirst({ where: { id: body.data.draftId, userId: user.id } });
     if (!existing) return notFound("Outreach draft not found");
+    if (existing.status !== OutreachStatus.AI_GENERATED) {
+      return badRequest("Only a newly generated draft can be approved.");
+    }
 
     const draft = await prisma.outreachDraft.update({
       where: { id: existing.id },

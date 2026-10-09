@@ -20,7 +20,7 @@ async function mergeField(fieldKey: string, extractedValue: string, edit?: strin
     pitchDeck: { update: vi.fn() },
   } as unknown as PrismaClient;
 
-  await mergePitchDeckExtraction(prisma, "user-1", {
+  await mergePitchDeckExtraction(prisma, "user-1", "startup-1", {
     extractionId: "extraction-1",
     fields: [{ fieldId: "field-1", action: edit === undefined ? "accept" : "edit", value: edit }],
   });

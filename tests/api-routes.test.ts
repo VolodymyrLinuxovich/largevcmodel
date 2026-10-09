@@ -123,6 +123,36 @@ describe("API authentication and error mapping", () => {
     createGoogleEvent.mockRestore();
   });
 
+  it("does not re-approve an outreach draft that was already sent", async () => {
+    const findFirst = vi.fn().mockResolvedValue({ id: "draft-1", userId: "user-1", contactId: "contact-1", status: "SENT" });
+    const update = vi.fn();
+    db.prisma.outreachDraft = { findFirst, update };
+    const { POST } = await import("@/app/api/outreach/approve/route");
+    const response = await POST(jsonRequest("/api/outreach/approve", { draftId: "draft-1" }));
+
+    expect(response.status).toBe(400);
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it("does not attach an ingested reply to another user's contact or draft", async () => {
+    const contactFindFirst = vi.fn().mockResolvedValue(null);
+    const draftFindFirst = vi.fn().mockResolvedValue(null);
+    const create = vi.fn();
+    db.prisma.contact = { findFirst: contactFindFirst };
+    db.prisma.outreachDraft = { findFirst: draftFindFirst, updateMany: vi.fn() };
+    db.prisma.reply = { create };
+    const { POST } = await import("@/app/api/replies/ingest/route");
+
+    const foreignContact = await POST(jsonRequest("/api/replies/ingest", { contactId: "foreign", bodySnippet: "Happy to meet." }));
+    expect(foreignContact.status).toBe(404);
+    expect(contactFindFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "foreign", userId: "user-1" } }));
+
+    const foreignDraft = await POST(jsonRequest("/api/replies/ingest", { draftId: "foreign", bodySnippet: "Happy to meet." }));
+    expect(foreignDraft.status).toBe(404);
+    expect(draftFindFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "foreign", userId: "user-1" } }));
+    expect(create).not.toHaveBeenCalled();
+  });
+
   it("does not leak database error details", async () => {
     const error = new Prisma.PrismaClientKnownRequestError('Invalid `prisma.opportunity.findMany()` column "secret_column" does not exist', {
       code: "P2022",
