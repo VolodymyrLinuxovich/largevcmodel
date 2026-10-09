@@ -54,3 +54,55 @@ describe("sync job enqueueing", () => {
     expect(prisma.auditEvent.create).not.toHaveBeenCalled();
   });
 });
+
+describe("sync job processing", () => {
+  it("skips jobs for disconnected services and keeps going after a failed job", async () => {
+    vi.resetModules();
+    const syncGmail = vi.fn().mockRejectedValue(new Error("Gmail quota"));
+    const syncGoogleContacts = vi.fn().mockResolvedValue({ imported: 2, nextPageToken: null, done: true });
+    const syncGoogleCalendar = vi.fn();
+    vi.doMock("@/lib/google/gmail", () => ({ syncGmail }));
+    vi.doMock("@/lib/google/contacts", () => ({ syncGoogleContacts }));
+    vi.doMock("@/lib/google/calendar", () => ({ syncGoogleCalendar }));
+    vi.doMock("@/lib/watchlist/service", () => ({ refreshWatchSignals: vi.fn() }));
+    const { processNextSyncJobs } = await import("@/lib/sync/jobs");
+
+    const jobs = [
+      { id: "job-mail", userId: "user-1", provider: "GMAIL", status: SyncJobStatus.FAILED, cursor: null, startedAt: null },
+      { id: "job-contacts", userId: "user-1", provider: "GOOGLE_CONTACTS", status: SyncJobStatus.PENDING, cursor: null, startedAt: null },
+      { id: "job-cal", userId: "user-1", provider: "GOOGLE_CALENDAR", status: SyncJobStatus.PENDING, cursor: null, startedAt: null },
+    ];
+    const integrationUpdates: unknown[] = [];
+    const prisma = {
+      integration: {
+        findMany: vi.fn().mockResolvedValue([{ service: "GMAIL" }, { service: "GOOGLE_CONTACTS" }]),
+        updateMany: vi.fn(async (args: unknown) => (integrationUpdates.push(args), { count: 1 })),
+      },
+      syncJob: {
+        findMany: vi.fn(async ({ where }: { where: { provider: { in: string[] } } }) => jobs.filter((job) => where.provider.in.includes(job.provider))),
+        findUnique: vi.fn(async ({ where }: { where: { id: string } }) => jobs.find((job) => job.id === where.id)),
+        update: vi.fn(async ({ where }: { where: { id: string } }) => jobs.find((job) => job.id === where.id)),
+        count: vi.fn().mockResolvedValue(0),
+      },
+      auditEvent: { create: vi.fn() },
+    } as unknown as PrismaClient;
+
+    const result = await processNextSyncJobs(prisma, { userId: "user-1" });
+
+    expect(result).toEqual({ processed: 1, failed: 1, remaining: 0 });
+    expect(syncGoogleCalendar).not.toHaveBeenCalled();
+    expect(syncGoogleContacts).toHaveBeenCalledOnce();
+    expect(integrationUpdates).toContainEqual(expect.objectContaining({ where: expect.objectContaining({ status: "CONNECTED" }) }));
+  });
+
+  it("does nothing when no Google service is connected", async () => {
+    const { processNextSyncJobs } = await import("@/lib/sync/jobs");
+    const prisma = {
+      integration: { findMany: vi.fn().mockResolvedValue([]) },
+      syncJob: { findMany: vi.fn() },
+    } as unknown as PrismaClient;
+
+    expect(await processNextSyncJobs(prisma, { userId: "user-1" })).toEqual({ processed: 0, failed: 0, remaining: 0 });
+    expect(prisma.syncJob.findMany).not.toHaveBeenCalled();
+  });
+});
