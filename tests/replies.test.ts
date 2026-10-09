@@ -9,6 +9,18 @@ describe("reply classification", () => {
     });
   });
 
+  it("does not read a declined reply as interest", () => {
+    expect(classifyReply("Thanks, but we are not interested right now.")).toMatchObject({
+      classification: "not_interested",
+      requiresHumanReview: false,
+    });
+    expect(classifyReply("We will pass on this round, no need to schedule a call.").classification).toBe("not_interested");
+  });
+
+  it("does not treat words containing pass as a decline", () => {
+    expect(classifyReply("Our team is passionate about this, happy to meet next week.").classification).toBe("interested");
+  });
+
   it("detects follow-up later", () => {
     expect(classifyReply("Can you follow up later, maybe in September?")).toMatchObject({
       classification: "follow_up_later",
