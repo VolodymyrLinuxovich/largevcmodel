@@ -69,8 +69,12 @@ export async function syncGoogleCalendar(
         : null;
       const existingEvent = await prisma.calendarEvent.findUnique({
         where: { userId_calendarId_providerEventId: { userId, calendarId: "primary", providerEventId: event.id } },
-        select: { id: true },
+        select: { id: true, contactId: true },
       });
+      if (existingEvent?.contactId && existingEvent.contactId !== matchingContact?.id) {
+        // The linked contact left the event, so their health must be recalculated too.
+        touchedContactIds.add(existingEvent.contactId);
+      }
 
       await prisma.calendarEvent.upsert({
         where: { userId_calendarId_providerEventId: { userId, calendarId: "primary", providerEventId: event.id } },
@@ -89,7 +93,8 @@ export async function syncGoogleCalendar(
           status: event.status ?? null,
         },
         update: {
-          contactId: matchingContact?.id,
+          // Null, not undefined, so a contact who left the event is unlinked.
+          contactId: matchingContact?.id ?? null,
           title: event.summary ?? null,
           description: event.description ?? null,
           location: event.location ?? null,
@@ -166,6 +171,10 @@ export async function syncGoogleCalendar(
           },
         });
         await recalculateRelationshipStrength(prisma, userId, matchingContact.id);
+      } else if (existingEvent) {
+        await prisma.contactInteraction.deleteMany({
+          where: { userId, type: ContactInteractionType.CALENDAR_MEETING, providerId: event.id },
+        });
       }
       imported += 1;
     }
