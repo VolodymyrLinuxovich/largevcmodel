@@ -1,3 +1,4 @@
+import { RISK_PATTERN } from "@/lib/evidence/classify";
 import type { EvidenceBundle } from "@/lib/evidence/loader";
 import {
   byCategory,
@@ -59,7 +60,6 @@ export type InvestmentMemoContent = {
 const MARKET = /\b(market|problem|industry|tam|sam|demand|customer pain|segment)\b/i;
 const PRODUCT = /\b(product|technology|technical|platform|ip|patent|architecture|model|software|hardware)\b/i;
 const TEAM = /\b(team|founder|co-founder|ceo|cto|hire|hiring|employees|headcount|leadership|background)\b/i;
-const RISK = /\b(risk|concern|litigation|regulat\w*|churn|competition|competitor|dependency|lawsuit)\b/i;
 const TRACTION_KEYS = new Set(["traction", "revenue", "customers"]);
 
 export type AlignmentMatch = "MATCH" | "NO_MATCH" | "UNKNOWN" | "NOT_DEFINED";
@@ -139,7 +139,7 @@ export function assembleInvestmentMemo(bundle: EvidenceBundle): InvestmentMemoCo
   const market = byCategory(established, MARKET);
   const product = byCategory(established, PRODUCT);
   const teamEvidence = byCategory(established, TEAM);
-  const riskEvidence = byCategory(established, RISK);
+  const riskEvidence = byCategory(established, RISK_PATTERN);
   const sources = citedSources(bundle, [...companyItems, ...established, ...unverified, ...inferences]);
   const people = personSummaries(bundle);
   const thesis = thesisCompatibility(bundle);
