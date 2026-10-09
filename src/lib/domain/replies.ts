@@ -3,11 +3,11 @@ import type { ReplyClassification } from "./types";
 export function classifyReply(body: string): { classification: ReplyClassification; confidence: number; requiresHumanReview: boolean } {
   const normalized = body.toLowerCase();
 
+  if (/(not interested|not taking|\bpass\b|no thanks|not a fit)/.test(normalized)) {
+    return { classification: "not_interested", confidence: 88, requiresHumanReview: false };
+  }
   if (/(happy to|timing is good|would be happy|let'?s meet|schedule|next week|interested)/.test(normalized)) {
     return { classification: "interested", confidence: 91, requiresHumanReview: false };
-  }
-  if (/(not interested|not taking|pass|no thanks|not a fit)/.test(normalized)) {
-    return { classification: "not_interested", confidence: 88, requiresHumanReview: false };
   }
   if (/(check back|follow up|later|september|next quarter|after launch)/.test(normalized)) {
     return { classification: "follow_up_later", confidence: 84, requiresHumanReview: false };

@@ -231,16 +231,26 @@ function normalizedText(values: Array<string | null | undefined>) {
   return values.filter(Boolean).join(" ").toLowerCase();
 }
 
+// Whole words only, so "partner" does not match "partnerships" and "us" does not match "business".
 function containsAny(text: string, needles: string[]) {
-  return needles.some((needle) => tokenVariants(needle).some((variant) => text.includes(variant)));
+  return needles.some((needle) =>
+    tokenVariants(needle).some((variant) => new RegExp(`(?<![a-z0-9])${escapeRegExp(variant)}(?:s|es)?(?![a-z0-9])`).test(text)),
+  );
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function tokenVariants(value: string) {
   const normalized = value.toLowerCase();
   const variants = new Set([normalized]);
-  if (normalized.endsWith("ies")) variants.add(`${normalized.slice(0, -3)}y`);
-  if (normalized.endsWith("es")) variants.add(normalized.slice(0, -2));
-  if (normalized.endsWith("s")) variants.add(normalized.slice(0, -1));
+  // Short words like "us" are not plurals.
+  if (normalized.length > 3) {
+    if (normalized.endsWith("ies")) variants.add(`${normalized.slice(0, -3)}y`);
+    if (normalized.endsWith("es")) variants.add(normalized.slice(0, -2));
+    if (normalized.endsWith("s")) variants.add(normalized.slice(0, -1));
+  }
   return Array.from(variants).filter(Boolean);
 }
 
@@ -321,7 +331,8 @@ export function parseNetworkObjective(input: z.infer<typeof networkSearchRequest
   ]);
   const geographies = unique([
     ...manual.geographies,
-    ...COMMON_GEOS.filter((geo) => text.includes(geo)),
+    // Whole words only, so "us" is not found inside "business" or "users".
+    ...COMMON_GEOS.filter((geo) => new RegExp(`\\b${geo}\\b`).test(text)),
     ...extractAfterPhrases(text, ["in", "near"]).filter((value) => value.length <= 40),
   ]);
   const institutions = unique([
