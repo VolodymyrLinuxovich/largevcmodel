@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { audit } from "@/lib/audit";
 import { requireCurrentUser } from "@/lib/auth/current-user";
+import { deleteImportedDataset } from "@/lib/domain/data-deletion";
 import { prisma } from "@/lib/prisma";
 import { revokeIntegration } from "@/lib/google/api";
 
@@ -21,9 +22,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     await revokeIntegration(prisma, user.id, id);
 
     if (parsed.deleteImportedData) {
-      await prisma.contact.deleteMany({ where: { userId: user.id, sourceIntegrationId: id } });
-      await prisma.gmailThread.deleteMany({ where: { userId: user.id } });
-      await prisma.calendarEvent.deleteMany({ where: { userId: user.id } });
+      // Revoking one Google integration revokes the shared grant, so remove every imported dataset
+      // together with the interactions, edges and health values derived from it.
+      for (const dataset of ["contacts", "gmail", "calendar"] as const) {
+        await deleteImportedDataset(prisma, user.id, dataset);
+      }
     }
 
     await audit(prisma, {

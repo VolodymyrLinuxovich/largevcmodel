@@ -140,20 +140,24 @@ export async function persistProviderOrganization(
 ) {
   const organization = normalizeProviderOrganization(input);
   if (!organization) return null;
-  const existing =
+  const byProvider =
     organization.providerOrgId
       ? await prisma.discoveredOrganization.findUnique({
           where: { userId_provider_providerOrgId: { userId, provider, providerOrgId: organization.providerOrgId } },
         })
-      : await prisma.discoveredOrganization.findFirst({
-          where: {
-            userId,
-            OR: [
-              organization.domain ? { domain: organization.domain } : undefined,
-              { name: { equals: organization.name, mode: "insensitive" } },
-            ].filter(Boolean) as Prisma.DiscoveredOrganizationWhereInput[],
-          },
-        });
+      : null;
+  // A new provider id still has to match firms saved earlier without an id or by another provider.
+  const existing =
+    byProvider ??
+    (await prisma.discoveredOrganization.findFirst({
+      where: {
+        userId,
+        OR: [
+          organization.domain ? { domain: organization.domain } : undefined,
+          { name: { equals: organization.name, mode: "insensitive" } },
+        ].filter(Boolean) as Prisma.DiscoveredOrganizationWhereInput[],
+      },
+    }));
 
   const data = {
     provider,
@@ -185,6 +189,27 @@ export async function persistProviderOrganization(
     claims: organization.claims ?? [],
   });
   return saved;
+}
+
+/**
+ * Merges an incoming record into a person that already exists. A provider that omits a field
+ * must not erase what an earlier source found, so empty values keep the stored ones and lists
+ * are combined.
+ */
+function mergePersonData<T extends Record<string, unknown>>(existing: Record<string, unknown>, incoming: T): Partial<T> {
+  const merged: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(incoming)) {
+    if (Array.isArray(value)) {
+      const stored = Array.isArray(existing[key]) ? (existing[key] as unknown[]) : [];
+      merged[key] = Array.from(new Set([...stored, ...value]));
+    } else if (value !== null && value !== undefined && value !== "") {
+      merged[key] = value;
+    }
+  }
+  // The provider and its person id identify one record together, so keep the stored pair when no new id arrives.
+  if (!merged.providerPersonId) delete merged.provider;
+  merged.searchText = personSearchText({ ...existing, ...merged } as PersistedPersonShape);
+  return merged as Partial<T>;
 }
 
 export async function persistProviderPerson(
@@ -272,10 +297,16 @@ export async function persistProviderPerson(
     lastResearchedAt: new Date(),
   };
 
-  const saved =
-    resolution.canonicalPersonId && resolution.outcome !== EntityResolutionOutcome.UNCERTAIN_MATCH
-      ? await prisma.discoveredPerson.update({ where: { id: resolution.canonicalPersonId }, data })
-      : await prisma.discoveredPerson.create({ data: { ...data, userId } });
+  const merging = resolution.canonicalPersonId && resolution.outcome !== EntityResolutionOutcome.UNCERTAIN_MATCH;
+  const existing = merging
+    ? byProvider ?? candidates.find((candidate) => candidate.id === resolution.canonicalPersonId) ?? null
+    : null;
+  const saved = merging
+    ? await prisma.discoveredPerson.update({
+        where: { id: resolution.canonicalPersonId! },
+        data: existing ? mergePersonData(existing, data) : data,
+      })
+    : await prisma.discoveredPerson.create({ data: { ...data, userId } });
 
   await prisma.entityResolutionDecision.create({
     data: {
