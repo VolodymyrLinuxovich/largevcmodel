@@ -511,7 +511,7 @@ export function evaluateHardFilters(
 
   if (filters.matchMode === "strict") {
     addStrictReason(reasons, "industry_mismatch", matchesAnyExpanded(filters.industries, [...person.industries, ...person.subIndustries], expandIndustryTerms));
-    addStrictReason(reasons, "stage_mismatch", matchesAnyExpanded(filters.stages, person.preferredStages, expandStageTerms));
+    addStrictReason(reasons, "stage_mismatch", matchesAnyExpanded(filters.stages, person.preferredStages, expandStageTerms, { exact: true }));
     addStrictReason(reasons, "geography_mismatch", matchesAnyExpanded(filters.locations, [person.location ?? "", ...person.geographyPreferences], expandGeographyTerms));
     addStrictReason(reasons, "organization_mismatch", matchesAnyExpanded(filters.organizations, [person.currentOrganizationName ?? "", ...person.previousOrganizations]));
     addStrictReason(reasons, "title_mismatch", matchesAnyExpanded(filters.titles, [person.currentTitle ?? ""]));
