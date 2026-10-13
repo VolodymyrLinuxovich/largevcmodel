@@ -29,6 +29,13 @@ describe("external people search pipeline", () => {
     expect(matchesAnyExpanded(["Seed"], ["pre-Series A"], expandStageTerms)).toBe(true);
   });
 
+  it("reads industry hints from the query as whole words", () => {
+    expect(interpretPeopleSearchObjective({ query: "Find investors backing aerospace startups" }).industries).toEqual([]);
+    expect(interpretPeopleSearchObjective({ query: "Find investors in defense aircraft" }).industries).toEqual([]);
+    expect(interpretPeopleSearchObjective({ query: "Find space and climate investors" }).industries).toEqual(["climate", "space"]);
+    expect(interpretPeopleSearchObjective({ query: "Find Defense AI investors at Series A" })).toMatchObject({ industries: ["defense ai"], stages: ["series a"] });
+  });
+
   it("does not let relationship Any filter external candidates", () => {
     const input = screenshotSearchInput();
     const startup = searchOnlyStartupContext("user", input, interpretPeopleSearchObjective({ query: input.query, filters: input.filters }));
