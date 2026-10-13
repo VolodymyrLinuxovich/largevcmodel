@@ -10,8 +10,14 @@ export function normalizeEmail(email?: string | null) {
   return value;
 }
 
+/** Lowercases, drops accents and keeps letters from every script, so Cyrillic or CJK names never collapse to "". */
 export function normalizedName(name: string) {
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  return name
+    .normalize("NFKD")
+    .replace(/\p{M}+/gu, "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
 }
 
 export function canonicalUrl(url: string) {
