@@ -124,6 +124,15 @@ describe("general network search", () => {
     expect(parsed.topics).not.toContain("Ukraine");
   });
 
+  it("does not keep interaction verbs like met or raised as topics", () => {
+    const parsed = parseNetworkObjective({ query: "Find founders I met who raised a seed round", strictness: "balanced" }, now);
+    expect(parsed.topics).not.toContain("met");
+    expect(parsed.topics).not.toContain("raised");
+    expect(parsed.positiveKeywords).not.toContain("met");
+    expect(parsed.interactionTypes).toContain("meeting");
+    expect(parsed.fundingStages).toContain("seed");
+  });
+
   it("supports recency and no-follow-up conditions", () => {
     const results = search("Find founders I met but never followed up with", [
       candidate({
