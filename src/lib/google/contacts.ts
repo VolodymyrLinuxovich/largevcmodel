@@ -71,6 +71,15 @@ export async function syncGoogleContacts(
           ? await prisma.contact.findUnique({ where: { userId_primaryEmail: { userId, primaryEmail } } })
           : null;
 
+        const existing =
+          existingByEmail ??
+          (providerId
+            ? await prisma.contact.findUnique({
+                where: { userId_source_providerId: { userId, source: ContactSource.GOOGLE_CONTACTS, providerId } },
+              })
+            : null);
+        const biography = person.biographies?.[0]?.value?.trim() || null;
+
         const where = existingByEmail
           ? { id: existingByEmail.id }
           : { userId_source_providerId: { userId, source: ContactSource.GOOGLE_CONTACTS, providerId: providerId || primaryEmail || "" } };
@@ -89,7 +98,7 @@ export async function syncGoogleContacts(
             organization,
             title,
             profileImageUrl: person.photos?.find((photo) => photo.metadata?.primary)?.url ?? person.photos?.[0]?.url ?? null,
-            notes: person.biographies?.[0]?.value ?? null,
+            notes: biography,
             groups: (person.memberships ?? [])
               .map((membership) => membership.contactGroupMembership?.contactGroupResourceName)
               .filter(Boolean) as string[],
@@ -104,7 +113,8 @@ export async function syncGoogleContacts(
             organization,
             title,
             profileImageUrl: person.photos?.find((photo) => photo.metadata?.primary)?.url ?? person.photos?.[0]?.url ?? null,
-            notes: person.biographies?.[0]?.value ?? null,
+            // Notes typed in the CRM win. A Google biography only fills empty notes.
+            notes: existing?.notes ? undefined : (biography ?? undefined),
             groups: (person.memberships ?? [])
               .map((membership) => membership.contactGroupMembership?.contactGroupResourceName)
               .filter(Boolean) as string[],
