@@ -190,7 +190,7 @@ export async function refreshWatchSignals(prisma: PrismaClient, userId: string, 
           where: { userId, companyId: { in: companyIds } },
           take: RECORD_LIMIT,
           orderBy: { calculatedAt: "desc" },
-          select: { id: true, companyId: true, overall: true, confidence: true, modelOrProvider: true, calculatedAt: true },
+          select: { id: true, companyId: true, thesisId: true, overall: true, confidence: true, modelOrProvider: true, calculatedAt: true },
         })
       : [],
   ]);

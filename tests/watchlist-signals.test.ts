@@ -102,6 +102,17 @@ describe("watchlist signal derivation", () => {
     expect(signals[0]).toMatchObject({ type: "FIT_SCORE_CHANGED", sourceRecordId: "f2", title: "Fit score rose from 53 to 61", metadata: { delta: 8 } });
   });
 
+  it("compares a fit score only with the previous score for the same thesis", () => {
+    const score = (id: string, thesisId: string, overall: number, calculatedAt: Date) => ({ id, companyId: "co-1", thesisId, overall, confidence: 60, modelOrProvider: "LargeVCModel heuristic v1", calculatedAt });
+    const signals = deriveSignals(
+      [companyItem],
+      records({ fitScores: [score("a0", "thesis-a", 80, before), score("b0", "thesis-b", 40, before), score("a1", "thesis-a", 81, after), score("b1", "thesis-b", 41, later), score("b2", "thesis-b", 60, later)] }),
+    );
+
+    expect(signals).toHaveLength(1);
+    expect(signals[0]).toMatchObject({ sourceRecordId: "b2", title: "Fit score rose from 41 to 60" });
+  });
+
   it("does not signal a first-ever score as a change", () => {
     const signals = deriveSignals([companyItem], records({ fitScores: [{ id: "f1", companyId: "co-1", overall: 70, confidence: 60, modelOrProvider: "x", calculatedAt: after }] }));
     expect(signals).toEqual([]);
