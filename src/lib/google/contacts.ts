@@ -71,6 +71,16 @@ export async function syncGoogleContacts(
           ? await prisma.contact.findUnique({ where: { userId_primaryEmail: { userId, primaryEmail } } })
           : null;
 
+        const existing =
+          existingByEmail ??
+          (providerId
+            ? await prisma.contact.findUnique({
+                where: { userId_source_providerId: { userId, source: ContactSource.GOOGLE_CONTACTS, providerId } },
+              })
+            : null);
+        // Keep addresses learned from other sources, such as Gmail, and add any new ones from Google.
+        const mergedEmails = Array.from(new Set([...emails, ...(existing?.emails ?? [])]));
+
         const where = existingByEmail
           ? { id: existingByEmail.id }
           : { userId_source_providerId: { userId, source: ContactSource.GOOGLE_CONTACTS, providerId: providerId || primaryEmail || "" } };
@@ -99,7 +109,7 @@ export async function syncGoogleContacts(
             sourceIntegrationId: integration.id,
             providerId,
             fullName,
-            emails,
+            emails: mergedEmails,
             phones: (person.phoneNumbers ?? []).map((phone) => phone.value).filter(Boolean) as string[],
             organization,
             title,
