@@ -62,7 +62,8 @@ export async function syncGoogleContacts(
           lowerEmail(person.emailAddresses?.find((email) => email.metadata?.primary)?.value) ?? emails[0] ?? null;
         const organization = person.organizations?.find((item) => item.current)?.name ?? person.organizations?.[0]?.name ?? null;
         const title = person.organizations?.find((item) => item.current)?.title ?? person.organizations?.[0]?.title ?? null;
-        const fullName = person.names?.find((name) => name.displayName)?.displayName ?? person.names?.[0]?.displayName ?? primaryEmail;
+        const googleName = person.names?.find((name) => name.displayName?.trim())?.displayName?.trim() || null;
+        const fullName = googleName ?? primaryEmail;
         const providerId = person.resourceName ?? primaryEmail ?? undefined;
 
         if (!providerId && !primaryEmail) continue;
@@ -98,7 +99,8 @@ export async function syncGoogleContacts(
           update: {
             sourceIntegrationId: integration.id,
             providerId,
-            fullName,
+            // A contact without a name in Google keeps the name stored in the CRM.
+            fullName: googleName ?? undefined,
             emails,
             phones: (person.phoneNumbers ?? []).map((phone) => phone.value).filter(Boolean) as string[],
             organization,
