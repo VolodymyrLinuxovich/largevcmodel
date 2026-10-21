@@ -64,6 +64,8 @@ export async function syncGoogleContacts(
         const title = person.organizations?.find((item) => item.current)?.title ?? person.organizations?.[0]?.title ?? null;
         const fullName = person.names?.find((name) => name.displayName)?.displayName ?? person.names?.[0]?.displayName ?? primaryEmail;
         const providerId = person.resourceName ?? primaryEmail ?? undefined;
+        const phones = (person.phoneNumbers ?? []).map((phone) => phone.value?.trim()).filter(Boolean) as string[];
+        const photoUrl = person.photos?.find((photo) => photo.metadata?.primary)?.url ?? person.photos?.[0]?.url ?? null;
 
         if (!providerId && !primaryEmail) continue;
 
@@ -85,10 +87,10 @@ export async function syncGoogleContacts(
             fullName,
             primaryEmail,
             emails,
-            phones: (person.phoneNumbers ?? []).map((phone) => phone.value).filter(Boolean) as string[],
+            phones,
             organization,
             title,
-            profileImageUrl: person.photos?.find((photo) => photo.metadata?.primary)?.url ?? person.photos?.[0]?.url ?? null,
+            profileImageUrl: photoUrl,
             notes: person.biographies?.[0]?.value ?? null,
             groups: (person.memberships ?? [])
               .map((membership) => membership.contactGroupMembership?.contactGroupResourceName)
@@ -100,10 +102,11 @@ export async function syncGoogleContacts(
             providerId,
             fullName,
             emails,
-            phones: (person.phoneNumbers ?? []).map((phone) => phone.value).filter(Boolean) as string[],
-            organization,
-            title,
-            profileImageUrl: person.photos?.find((photo) => photo.metadata?.primary)?.url ?? person.photos?.[0]?.url ?? null,
+            // Google fields only replace stored values when Google has a value.
+            phones: phones.length ? phones : undefined,
+            organization: organization ?? undefined,
+            title: title ?? undefined,
+            profileImageUrl: photoUrl ?? undefined,
             notes: person.biographies?.[0]?.value ?? null,
             groups: (person.memberships ?? [])
               .map((membership) => membership.contactGroupMembership?.contactGroupResourceName)
