@@ -25,20 +25,35 @@ export function slugify(value: string) {
   return normalizeUsername(value).replace(/_/g, "-") || "untitled";
 }
 
-const optionalUrl = z
+/**
+ * The editor sends every field, with null for a field that was never set and "" for one the user
+ * cleared. Both become null so the field is accepted and cleared on update. A missing key stays
+ * undefined and leaves the stored value alone.
+ */
+function clearable<T extends z.ZodTypeAny>(schema: T) {
+  return z.preprocess(
+    (value) => (value === null || (typeof value === "string" && !value.trim()) ? null : value),
+    z.union([z.null(), schema]),
+  );
+}
+
+const urlField = z
   .string()
   .trim()
   .optional()
   .transform((value) => value || undefined)
   .pipe(z.string().url().optional());
 
-const optionalText = (max = 280) =>
+const textField = (max = 280) =>
   z
     .string()
     .trim()
     .max(max)
     .optional()
     .transform((value) => value || undefined);
+
+const optionalUrl = clearable(urlField);
+const optionalText = (max = 280) => clearable(textField(max));
 
 export const profileSaveSchema = z.object({
   profile: z.object({
@@ -54,13 +69,16 @@ export const profileSaveSchema = z.object({
     visibility: z.nativeEnum(ProfileVisibility).default(ProfileVisibility.PUBLIC),
     messagingPermission: z.nativeEnum(ProfilePermission).default(ProfilePermission.EVERYONE),
     connectionPermission: z.nativeEnum(ProfilePermission).default(ProfilePermission.EVERYONE),
-    socialLinks: z
-      .object({
-        linkedin: optionalUrl,
-        github: optionalUrl,
-        x: optionalUrl,
-      })
-      .optional(),
+    socialLinks: z.preprocess(
+      (value) => value ?? undefined,
+      z
+        .object({
+          linkedin: optionalUrl,
+          github: optionalUrl,
+          x: optionalUrl,
+        })
+        .optional(),
+    ),
   }),
   product: z
     .object({
@@ -69,7 +87,7 @@ export const profileSaveSchema = z.object({
       role: optionalText(120),
       description: optionalText(500),
       category: optionalText(120),
-      stage: z.nativeEnum(ProductStage).optional(),
+      stage: clearable(z.nativeEnum(ProductStage).optional()),
       teamSize: z.coerce.number().int().min(0).max(100000).optional().or(z.literal("").transform(() => undefined)),
       fundingStatus: optionalText(160),
       tractionMetric: optionalText(220),
@@ -136,7 +154,7 @@ export async function ensureProfile(prisma: PrismaClient, user: { id: string; em
   });
 }
 
-function stringList(value?: string) {
+function stringList(value?: string | null) {
   return value
     ? value
         .split(",")
@@ -145,7 +163,8 @@ function stringList(value?: string) {
     : [];
 }
 
-function parsedDate(value?: string) {
+function parsedDate(value?: string | null) {
+  if (value === null) return null;
   if (!value) return undefined;
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? undefined : date;
