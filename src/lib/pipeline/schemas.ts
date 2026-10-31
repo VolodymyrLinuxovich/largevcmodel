@@ -18,9 +18,21 @@ export function optionalText(max: number) {
     .transform((value) => (value ? value : value === undefined ? undefined : null));
 }
 
+/** True when YYYY-MM-DD names a day that exists. Date would roll 2026-02-31 over into March. */
+function isCalendarDay(value: string) {
+  const [year, month, day] = value.split("-").map(Number) as [number, number, number];
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}
+
 /** Accepts an ISO timestamp or an HTML date-input value (YYYY-MM-DD, interpreted as UTC midnight). */
 export const optionalDate = z
-  .union([z.string().datetime({ offset: true }), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD"), z.literal(""), z.null()])
+  .union([
+    z.string().datetime({ offset: true }),
+    z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD").refine(isCalendarDay, "Enter a date that exists."),
+    z.literal(""),
+    z.null(),
+  ])
   .optional()
   .transform((value) => {
     if (value === undefined) return undefined;

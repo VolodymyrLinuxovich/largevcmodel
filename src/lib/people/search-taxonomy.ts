@@ -1,4 +1,5 @@
 import { PersonType } from "@prisma/client";
+import { phraseMatch } from "@/lib/domain/text-match";
 
 const INDUSTRY_ALIASES: Record<string, string[]> = {
   miltech: [
@@ -93,12 +94,26 @@ export function expandGeographyTerms(values: string[]) {
   return expandTerms(values, GEOGRAPHY_ALIASES);
 }
 
-export function matchesAnyExpanded(needles: string[], haystack: string[], expand: (values: string[]) => string[] = expandTermsIdentity) {
+/**
+ * Matches filter terms against person fields as whole words, so "AI" does not match "Retail".
+ * With `exact`, an expanded term must equal an expanded field term. Stages need this because the
+ * seed aliases include "pre-series a", which contains "series a".
+ */
+export function matchesAnyExpanded(
+  needles: string[],
+  haystack: string[],
+  expand: (values: string[]) => string[] = expandTermsIdentity,
+  options: { exact?: boolean } = {},
+) {
   const expandedNeedles = expand(needles).map(normalizeTerm).filter(Boolean);
   if (!expandedNeedles.length) return true;
-  const haystackText = expand(haystack).map(normalizeTerm).join(" ");
-  if (!haystackText.trim()) return null;
-  return expandedNeedles.some((needle) => haystackText.includes(needle) || needle.includes(haystackText));
+  const entries = expand(haystack).map(normalizeTerm).filter(Boolean);
+  if (!entries.length) return null;
+  if (options.exact) {
+    const available = new Set(entries);
+    return expandedNeedles.some((needle) => available.has(needle));
+  }
+  return expandedNeedles.some((needle) => entries.some((entry) => phraseMatch(entry, needle)));
 }
 
 export function isInvestmentPersonType(types: PersonType[], title?: string | null) {

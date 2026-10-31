@@ -1,7 +1,7 @@
 import { ClaimProvenance, PrismaClient, ResearchStatus } from "@prisma/client";
 import { z } from "zod";
 import { audit } from "@/lib/audit";
-import { canonicalizeUrl, dedupeSources } from "./sources";
+import { canonicalizeUrl, dedupeSources, sourceInputSchema } from "./sources";
 import { calculateFitScore, DEFAULT_SCORING_WEIGHTS } from "./scoring";
 import { researchWithConfiguredProvider } from "@/lib/research/provider";
 import { executeNetworkSearch, networkSearchRequestSchema, parseNetworkObjective } from "./network-search";
@@ -59,6 +59,14 @@ export async function executeResearchQuery(prisma: PrismaClient, userId: string,
   return result;
 }
 
+function safeCanonicalUrl(url: string) {
+  try {
+    return canonicalizeUrl(url);
+  } catch {
+    return null;
+  }
+}
+
 export async function researchSubject(prisma: PrismaClient, userId: string, input: z.infer<typeof researchRequestSchema>) {
   const [contact, company] = await Promise.all([
     input.contactId
@@ -100,13 +108,22 @@ export async function researchSubject(prisma: PrismaClient, userId: string, inpu
       geography: company?.geography,
     });
 
+    // One malformed source from the provider must not fail the run after other records were written.
+    const validSources = result.sources.filter((source) => sourceInputSchema.safeParse(source).success);
+    const skippedSources = result.sources.length - validSources.length;
     // Provider output is untrusted: link everything to the subject that was looked up for this user,
     // never to contact or company ids the provider echoes back.
     const subjectContactId = contact?.id ?? null;
     const subjectCompanyId = contact?.companyId ?? company?.id ?? null;
     const sources = await Promise.all(
-      dedupeSources(result.sources).map(async (source) => {
+      dedupeSources(validSources).map(async (source) => {
         const canonicalUrl = canonicalizeUrl(source.url);
+        // A source is shared by URL across research runs and subjects. Keep the claims and
+        // details it already supports instead of replacing them with this run's values.
+        const existing = await prisma.source.findUnique({
+          where: { userId_canonicalUrl: { userId, canonicalUrl } },
+          select: { supportsClaims: true, publisher: true, publishedAt: true, snippet: true },
+        });
         return prisma.source.upsert({
           where: { userId_canonicalUrl: { userId, canonicalUrl } },
           create: {
@@ -126,13 +143,13 @@ export async function researchSubject(prisma: PrismaClient, userId: string, inpu
           },
           update: {
             title: source.title,
-            publisher: source.publisher ?? null,
-            publishedAt: source.publishedAt ? new Date(source.publishedAt) : null,
+            publisher: source.publisher ?? existing?.publisher ?? null,
+            publishedAt: source.publishedAt ? new Date(source.publishedAt) : (existing?.publishedAt ?? null),
             accessedAt: new Date(source.accessedAt),
             sourceType: source.sourceType,
             origin: source.origin,
-            snippet: source.snippet ?? null,
-            supportsClaims: source.supportsClaims,
+            snippet: source.snippet ?? existing?.snippet ?? null,
+            supportsClaims: Array.from(new Set([...(existing?.supportsClaims ?? []), ...source.supportsClaims])),
           },
         });
       }),
@@ -155,7 +172,8 @@ export async function researchSubject(prisma: PrismaClient, userId: string, inpu
       });
 
       for (const sourceUrl of claim.sourceUrls ?? []) {
-        const source = sourcesByCanonicalUrl.get(canonicalizeUrl(sourceUrl));
+        const canonical = safeCanonicalUrl(sourceUrl);
+        const source = canonical ? sourcesByCanonicalUrl.get(canonical) : undefined;
         if (!source) continue;
         await prisma.claimSource.create({
           data: { claimId: storedClaim.id, sourceId: source.id, supportedClaim: claim.text },
@@ -180,7 +198,7 @@ export async function researchSubject(prisma: PrismaClient, userId: string, inpu
       outcome: "completed",
       affectedContactId: contact?.id,
       dataSource: result.provider,
-      details: `${sources.length} sources and ${result.claims.length} claims persisted with provenance.`,
+      details: `${sources.length} sources and ${result.claims.length} claims persisted with provenance.${skippedSources ? ` ${skippedSources} sources with an invalid URL were skipped.` : ""}`,
       researchRunId: run.id,
     });
 

@@ -1,3 +1,4 @@
+import { RISK_PATTERN } from "@/lib/evidence/classify";
 import type { EvidenceBundle } from "@/lib/evidence/loader";
 import {
   byCategory,
@@ -5,6 +6,7 @@ import {
   claimItems,
   companyFieldItems,
   concerns,
+  currentFitScore,
   iso,
   keyFacts,
   missingInformation,
@@ -59,7 +61,6 @@ export type InvestmentMemoContent = {
 const MARKET = /\b(market|problem|industry|tam|sam|demand|customer pain|segment)\b/i;
 const PRODUCT = /\b(product|technology|technical|platform|ip|patent|architecture|model|software|hardware)\b/i;
 const TEAM = /\b(team|founder|co-founder|ceo|cto|hire|hiring|employees|headcount|leadership|background)\b/i;
-const RISK = /\b(risk|concern|litigation|regulat\w*|churn|competition|competitor|dependency|lawsuit)\b/i;
 const TRACTION_KEYS = new Set(["traction", "revenue", "customers"]);
 
 export type AlignmentMatch = "MATCH" | "NO_MATCH" | "UNKNOWN" | "NOT_DEFINED";
@@ -113,11 +114,12 @@ function counterarguments(bundle: EvidenceBundle, established: EvidenceItem[], f
   if (traction.every((fact) => fact.status !== "ESTABLISHED")) {
     items.push(generated("No traction, revenue or customer evidence is established; any case for the company currently rests on descriptive information.", "Traction, revenue and customer facts are unverified or unavailable."));
   }
-  if (bundle.fitScore && bundle.fitScore.overall >= 60 && bundle.fitScore.confidence < 50) {
+  const fit = currentFitScore(bundle);
+  if (fit && fit.overall >= 60 && fit.confidence < 50) {
     items.push(
       generated(
         "The fit score is relatively high but its confidence is low; the alignment may not hold once gaps are filled.",
-        `Fit ${bundle.fitScore.overall} with confidence ${bundle.fitScore.confidence}.`,
+        `Fit ${fit.overall} with confidence ${fit.confidence}.`,
       ),
     );
   }
@@ -139,7 +141,7 @@ export function assembleInvestmentMemo(bundle: EvidenceBundle): InvestmentMemoCo
   const market = byCategory(established, MARKET);
   const product = byCategory(established, PRODUCT);
   const teamEvidence = byCategory(established, TEAM);
-  const riskEvidence = byCategory(established, RISK);
+  const riskEvidence = byCategory(established, RISK_PATTERN);
   const sources = citedSources(bundle, [...companyItems, ...established, ...unverified, ...inferences]);
   const people = personSummaries(bundle);
   const thesis = thesisCompatibility(bundle);
