@@ -42,6 +42,21 @@ describe("startup profile save flow", () => {
     expect(saved.data.customerCount).toBe(12);
   });
 
+  it("rejects a minimum check size above the maximum", () => {
+    const parsed = startupProfileInputSchema.safeParse({ name: "Atlas Robotics", minCheckSize: "2000000", maxCheckSize: "250000" });
+
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      const fieldErrors = parsed.error.flatten().fieldErrors as Record<string, string[] | undefined>;
+      expect(fieldErrors.maxCheckSize?.[0]).toBe("Minimum check size cannot exceed maximum.");
+    }
+  });
+
+  it("accepts a check range with only one bound", () => {
+    expect(startupProfileInputSchema.safeParse({ name: "Atlas Robotics", minCheckSize: "2000000" }).success).toBe(true);
+    expect(startupProfileInputSchema.safeParse({ name: "Atlas Robotics", maxCheckSize: "250000" }).success).toBe(true);
+  });
+
   it("accepts a blank website", () => {
     const parsed = startupProfileInputSchema.parse({ name: "Atlas Robotics", website: "", logoUrl: "" });
 
