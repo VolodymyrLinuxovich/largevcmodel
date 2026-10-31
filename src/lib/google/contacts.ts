@@ -79,6 +79,8 @@ export async function syncGoogleContacts(
                 where: { userId_source_providerId: { userId, source: ContactSource.GOOGLE_CONTACTS, providerId } },
               })
             : null);
+        // Keep addresses learned from other sources, such as Gmail, and add any new ones from Google.
+        const mergedEmails = Array.from(new Set([...emails, ...(existing?.emails ?? [])]));
         const biography = person.biographies?.[0]?.value?.trim() || null;
 
         const where = existingByEmail
@@ -110,7 +112,7 @@ export async function syncGoogleContacts(
             providerId,
             // A contact without a name in Google keeps the name stored in the CRM.
             fullName: googleName ?? undefined,
-            emails,
+            emails: mergedEmails,
             phones: (person.phoneNumbers ?? []).map((phone) => phone.value).filter(Boolean) as string[],
             organization,
             title,
