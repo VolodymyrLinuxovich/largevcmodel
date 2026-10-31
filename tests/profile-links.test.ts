@@ -19,7 +19,7 @@ describe("profile link validation", () => {
       project: { name: "Atlas", websiteUrl: "HTTPS://atlas.dev/launch" },
     });
     expect(parsed.profile.websiteUrl).toBe("https://jane.dev");
-    expect(parsed.profile.avatarUrl).toBeUndefined();
+    expect(parsed.profile.avatarUrl).toBeNull();
     expect(parsed.profile.socialLinks?.github).toBe("http://github.com/jane");
     expect(parsed.project?.websiteUrl).toBe("HTTPS://atlas.dev/launch");
   });
