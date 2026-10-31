@@ -117,13 +117,20 @@ export async function usernameAvailable(prisma: PrismaClient, username: string, 
   return !existing || existing.userId === userId;
 }
 
+// Shorten the base first so the suffix survives the 32 character limit.
+export function usernameWithSuffix(base: string, index: number) {
+  const suffix = `-${index}`;
+  const stem = base.slice(0, 32 - suffix.length).replace(/-+$/, "");
+  return normalizeUsername(`${stem}${suffix}`);
+}
+
 export async function ensureProfile(prisma: PrismaClient, user: { id: string; email: string; name: string | null; imageUrl?: string | null }) {
   const existing = await prisma.userProfile.findUnique({ where: { userId: user.id } });
   if (existing) return existing;
-  const base = normalizeUsername(user.email.split("@")[0] || user.id.slice(0, 8));
-  let username = base || `user-${user.id.slice(0, 8)}`;
+  const base = normalizeUsername(user.email.split("@")[0] || user.id.slice(0, 8)) || `user-${user.id.slice(0, 8)}`;
+  let username = base;
   for (let index = 2; !(await usernameAvailable(prisma, username, user.id)); index += 1) {
-    username = `${base}-${index}`;
+    username = usernameWithSuffix(base, index);
   }
   return prisma.userProfile.create({
     data: {
