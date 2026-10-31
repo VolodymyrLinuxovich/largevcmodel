@@ -102,6 +102,17 @@ describe("watchlist signal derivation", () => {
     expect(signals[0]).toMatchObject({ type: "FIT_SCORE_CHANGED", sourceRecordId: "f2", title: "Fit score rose from 53 to 61", metadata: { delta: 8 } });
   });
 
+  it("compares a fit score only with the previous score for the same thesis", () => {
+    const score = (id: string, thesisId: string, overall: number, calculatedAt: Date) => ({ id, companyId: "co-1", thesisId, overall, confidence: 60, modelOrProvider: "LargeVCModel heuristic v1", calculatedAt });
+    const signals = deriveSignals(
+      [companyItem],
+      records({ fitScores: [score("a0", "thesis-a", 80, before), score("b0", "thesis-b", 40, before), score("a1", "thesis-a", 81, after), score("b1", "thesis-b", 41, later), score("b2", "thesis-b", 60, later)] }),
+    );
+
+    expect(signals).toHaveLength(1);
+    expect(signals[0]).toMatchObject({ sourceRecordId: "b2", title: "Fit score rose from 41 to 60" });
+  });
+
   it("does not signal a first-ever score as a change", () => {
     const signals = deriveSignals([companyItem], records({ fitScores: [{ id: "f1", companyId: "co-1", overall: 70, confidence: 60, modelOrProvider: "x", calculatedAt: after }] }));
     expect(signals).toEqual([]);
@@ -207,5 +218,35 @@ describe("watchlist service", () => {
 
     expect(items[1].lastCheckedAt.getTime()).toBeGreaterThanOrEqual(watchedToday.getTime());
     expect(inserted.filter((signal) => signal.dedupeKey.startsWith("w-new:"))).toEqual([]);
+  });
+
+  it("compares company fit scores only and ignores per contact scores", async () => {
+    const items = [
+      { id: "w-co", entityType: "COMPANY", companyId: "co-1", contactId: null, opportunityId: null, opportunity: null, lastCheckedAt: SINCE },
+    ];
+    const scores = [
+      { id: "fit-company", companyId: "co-1", contactId: null, overall: 80, confidence: 70, modelOrProvider: "pipeline", calculatedAt: after },
+      { id: "fit-contact", companyId: "co-1", contactId: "ct-9", overall: 40, confidence: 60, modelOrProvider: "research", calculatedAt: later },
+    ];
+    const inserted: Array<{ type: string }> = [];
+    const prisma = {
+      watchlistItem: { findMany: async () => items, updateMany: async () => ({ count: 1 }) },
+      researchClaim: { findMany: async () => [] },
+      source: { findMany: async () => [] },
+      opportunityEvent: { findMany: async () => [] },
+      fitScore: {
+        findMany: async ({ where }: { where: { contactId?: string | null } }) =>
+          scores.filter((score) => !("contactId" in where) || score.contactId === where.contactId),
+      },
+      watchSignal: {
+        createMany: ({ data }: { data: Array<{ type: string }> }) => (inserted.push(...data), { count: data.length }),
+      },
+      $transaction: async (operations: unknown[]) => Promise.all(operations),
+      auditEvent: { create: vi.fn() },
+    } as unknown as PrismaClient;
+
+    await refreshWatchSignals(prisma, "user-1", new Date("2026-09-04T00:00:00Z"));
+
+    expect(inserted.filter((signal) => signal.type === "FIT_SCORE_CHANGED")).toEqual([]);
   });
 });

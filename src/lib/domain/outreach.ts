@@ -25,9 +25,14 @@ function displayName(contact: OutreachContact) {
   return contact.fullName || contact.primaryEmail || "there";
 }
 
+const HONORIFICS = new Set(["dr", "prof", "professor", "mr", "mrs", "ms", "miss", "mx", "sir", "dame"]);
+
 function firstName(contact: OutreachContact) {
   const name = displayName(contact);
-  return name.includes("@") ? "there" : name.split(" ")[0] || name;
+  if (name.includes("@")) return "there";
+  const words = name.split(/\s+/).filter(Boolean);
+  const first = words.find((word) => !HONORIFICS.has(word.replace(/\.$/, "").toLowerCase()));
+  return first ?? words[0] ?? "there";
 }
 
 export function generateOutreachDraft(contact: OutreachContact, sources: OutreachSource[], options: OutreachOptions = {}) {

@@ -248,6 +248,8 @@ function tokenVariants(value: string) {
   return Array.from(variants).filter(Boolean);
 }
 
+const PHRASE_END = /\b(who|that|with|and|or|about|last|this|where|when|working|raised|met|emailed|never|not)\b/i;
+
 function extractAfterPhrases(query: string, phrases: string[]) {
   const values: string[] = [];
   for (const phrase of phrases) {
@@ -256,11 +258,32 @@ function extractAfterPhrases(query: string, phrases: string[]) {
     const match = query.match(regex);
     if (match?.[1]) {
       const cleaned = match[1]
-        .split(/\b(who|that|with|and|or|about|last|this|where|when|working|raised|met|emailed|never|not)\b/i)[0]
+        .split(PHRASE_END)[0]
         .replace(/[?.!,]+$/g, "")
         .trim();
       if (cleaned) values.push(cleaned);
     }
+  }
+  return values;
+}
+
+// "working in climate" and "investors in fintech" name a sector, not a place.
+const SECTOR_WORDS = "work|works|worked|working|invest|invests|invested|investing|investor|investors|interested|focus|focused|focusing|specialize|specialized|specializing|experience|expertise";
+const SECTOR_BEFORE_IN = new RegExp(`\\b(?:${SECTOR_WORDS})\\s+$`);
+const SECTOR_WORD_AT_END = new RegExp(`\\s*\\b(?:${SECTOR_WORDS})$`);
+
+function placesAfterPrepositions(text: string) {
+  const values: string[] = [];
+  // The lookahead lets every "in" or "near" be read, also when one follows another.
+  for (const match of text.matchAll(/\b(in|near)\s+(?=([a-z0-9][a-z0-9 .&+-]{1,80}))/gi)) {
+    if (match[1]!.toLowerCase() === "in" && SECTOR_BEFORE_IN.test(text.slice(0, match.index))) continue;
+    const place = match[2]!
+      .split(PHRASE_END)[0]!
+      .split(/\b(?:in|near)\b/i)[0]!
+      .replace(/[?.!,]+$/g, "")
+      .trim()
+      .replace(SECTOR_WORD_AT_END, "");
+    if (place && place.length <= 40) values.push(place);
   }
   return values;
 }
@@ -326,7 +349,7 @@ export function parseNetworkObjective(input: z.infer<typeof networkSearchRequest
   const geographies = unique([
     ...manual.geographies,
     ...COMMON_GEOS.filter((geo) => text.includes(geo)),
-    ...extractAfterPhrases(text, ["in", "near"]).filter((value) => value.length <= 40),
+    ...placesAfterPrepositions(text),
   ]);
   const institutions = unique([
     text.includes("berkeley") ? "Berkeley" : null,
