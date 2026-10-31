@@ -14,16 +14,18 @@ export function SyncJobRunner({ enabled }: { enabled: boolean }) {
     async function run() {
       setStatus("running");
       try {
+        let sawFailure = false;
         for (let attempt = 0; attempt < 6; attempt += 1) {
           const response = await fetch("/api/sync/jobs/process", { method: "POST" });
-          const payload = (await response.json().catch(() => ({}))) as { remaining?: number; error?: string };
+          const payload = (await response.json().catch(() => ({}))) as { remaining?: number; failed?: number; error?: string };
           if (!response.ok) throw new Error(payload.error ?? "Sync failed");
           if (cancelled) return;
+          if (payload.failed) sawFailure = true;
           router.refresh();
           if (!payload.remaining) break;
           await new Promise((resolve) => setTimeout(resolve, 2500));
         }
-        if (!cancelled) setStatus("done");
+        if (!cancelled) setStatus(sawFailure ? "error" : "done");
       } catch {
         if (!cancelled) setStatus("error");
       }
