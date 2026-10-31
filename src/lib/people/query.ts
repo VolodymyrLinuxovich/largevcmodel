@@ -70,16 +70,15 @@ export function interpretPeopleSearchObjective(input: {
     ...parseStartupPersonTypes(startupCriteria.targetPersonTypes),
   ]);
 
-  const lower = query.toLowerCase();
   const stages = uniqueStrings([
     ...(filters?.stages ?? []),
-    ...STAGE_HINTS.filter((stage) => lower.includes(stage)),
+    ...STAGE_HINTS.filter((stage) => containsWords(query, stage)),
     ...stringsFromUnknown(startupCriteria.targetStages),
   ]).map((stage) => stage.replace("pre seed", "pre-seed"));
 
   const locations = uniqueStrings([
     ...(filters?.locations ?? []),
-    ...LOCATION_HINTS.filter((location) => new RegExp(`\\b${escapeRegExp(location)}\\b`, "i").test(query)),
+    ...LOCATION_HINTS.filter((location) => containsWords(query, location)),
     ...stringsFromUnknown(startupCriteria.targetLocations),
   ]);
 
@@ -91,7 +90,7 @@ export function interpretPeopleSearchObjective(input: {
 
   const industries = uniqueStrings([
     ...(filters?.industries ?? []),
-    ...INDUSTRY_HINTS.filter((industry) => lower.includes(industry)),
+    ...INDUSTRY_HINTS.filter((industry) => containsWords(query, industry)),
     ...stringsFromUnknown(startupCriteria.targetIndustries),
   ]);
 
@@ -172,7 +171,8 @@ function extractTitles(query: string) {
 function extractAfterPhrases(query: string, phrases: string[]) {
   const values = new Set<string>();
   for (const phrase of phrases) {
-    const regex = new RegExp(`${escapeRegExp(phrase)}\\s+([^.,;?]{3,90})`, "i");
+    // Whole words only, so "using" is not found inside "focusing" or "housing".
+    const regex = new RegExp(`\\b${escapeRegExp(phrase)}\\s+([^.,;?]{3,90})`, "i");
     const match = query.match(regex);
     if (match?.[1]) {
       for (const part of match[1].split(/\band\b|,|\/|\+/i)) {
@@ -207,7 +207,7 @@ function extractExcludedTerms(query: string) {
 }
 
 function parseCheckRange(query: string) {
-  const between = query.match(/\bbetween\s+\$?([0-9.]+)\s*([kKmM]?)\s+(?:and|-|to)\s+\$?([0-9.]+)\s*([kKmM]?)/);
+  const between = query.match(/\bbetween\s+\$?([0-9.]+)\s*([kKmM]?)\s+(?:and|-|to)\s+\$?([0-9.]+)\s*([kKmM]?)/i);
   if (between) {
     return { min: money(between[1]!, between[2]!), max: money(between[3]!, between[4]!) };
   }
@@ -257,6 +257,11 @@ function uniqueStrings(values: Array<string | null | undefined>) {
         .map((value) => value.replace(/\s+/g, " ")),
     ),
   );
+}
+
+/** Whole word match, so "aerospace" does not yield "space" and "defense aircraft" does not yield "defense ai". */
+function containsWords(query: string, phrase: string) {
+  return new RegExp(`\\b${escapeRegExp(phrase)}\\b`, "i").test(query);
 }
 
 function escapeRegExp(value: string) {

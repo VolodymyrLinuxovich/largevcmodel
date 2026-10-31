@@ -1,4 +1,4 @@
-import { claimToEvidence, isEstablished, matchesTopic, resolveKeyFacts, toSourceRef, type SensitiveFactKey } from "./classify";
+import { claimToEvidence, isEstablished, matchesTopic, RISK_PATTERN, resolveKeyFacts, toSourceRef, type SensitiveFactKey } from "./classify";
 import type { EvidenceBundle } from "./loader";
 import { safeExternalUrl } from "./safe-url";
 import type { EvidenceItem, GeneratedItem, KeyFact, SourceRef } from "./types";
@@ -186,6 +186,14 @@ export type ThesisCompatibility =
       calculatedAt: string;
     };
 
+/**
+ * The stored fit score, or null when it was calculated against a different thesis than the one
+ * now in effect. A stale score must not drive concerns, questions or missing information.
+ */
+export function currentFitScore(bundle: EvidenceBundle) {
+  return bundle.fitScore && !bundle.fitScore.thesisChanged ? bundle.fitScore : null;
+}
+
 export function thesisCompatibility(bundle: EvidenceBundle): ThesisCompatibility {
   if (!bundle.fitScore) {
     return bundle.thesis
@@ -239,7 +247,8 @@ export function missingInformation(bundle: EvidenceBundle, facts: KeyFact[]): st
   if (!bundle.claims.length) missing.push("No research claims are stored for this company or its linked people.");
   if (!bundle.coverage.gmailConnected) missing.push("Gmail is not connected; email history may be incomplete.");
   if (!bundle.coverage.calendarConnected) missing.push("Google Calendar is not connected; meeting history may be incomplete.");
-  if (bundle.fitScore) missing.push(...bundle.fitScore.missingInfo.map((item) => `Fit score: ${item}`));
+  const fit = currentFitScore(bundle);
+  if (fit) missing.push(...fit.missingInfo.map((item) => `Fit score: ${item}`));
   return Array.from(new Set(missing));
 }
 
@@ -254,8 +263,9 @@ export function concerns(bundle: EvidenceBundle, items: EvidenceItem[]): Generat
       basis: assessed.map((person) => `${person.name}: ${person.health.state.toLowerCase()}`).join("; "),
     });
   }
-  if (bundle.fitScore) {
-    for (const [key, score] of Object.entries(bundle.fitScore.criteria)) {
+  const fit = currentFitScore(bundle);
+  if (fit) {
+    for (const [key, score] of Object.entries(fit.criteria)) {
       if (["thesisMatch", "stageFit", "geographyFit"].includes(key) && score !== null && score < 50) {
         flags.push({ kind: "GENERATED_SUGGESTION", text: `Low ${key.replace(/([A-Z])/g, " $1").toLowerCase()} in the stored fit score.`, basis: `Criterion score ${score}/100.` });
       }
@@ -269,7 +279,7 @@ export function concerns(bundle: EvidenceBundle, items: EvidenceItem[]): Generat
       basis: "Claims without cited sources or marked as inference.",
     });
   }
-  const riskClaims = byCategory(items.filter(isEstablished), /\b(risk|concern|litigation|regulat|churn|competition|competitor)\b/i);
+  const riskClaims = byCategory(items.filter(isEstablished), RISK_PATTERN);
   for (const claim of riskClaims.slice(0, 5)) {
     flags.push({ kind: "GENERATED_SUGGESTION", text: `Evidence mentions a potential risk: ${claim.text}`, basis: `Claim ${claim.record.id}.` });
   }
@@ -301,8 +311,9 @@ export function suggestedQuestions(bundle: EvidenceBundle, facts: KeyFact[], ite
   for (const item of items.filter((entry) => entry.evidenceClass === "UNVERIFIED").slice(0, 3)) {
     questions.push({ kind: "GENERATED_SUGGESTION", text: `Can you confirm: "${item.text}"?`, basis: `Unverified claim ${item.record.id}.` });
   }
-  if (bundle.thesis && bundle.fitScore) {
-    const weak = Object.entries(bundle.fitScore.criteria).filter(([key, score]) => ["stageFit", "geographyFit"].includes(key) && score !== null && score < 50);
+  const fit = currentFitScore(bundle);
+  if (bundle.thesis && fit) {
+    const weak = Object.entries(fit.criteria).filter(([key, score]) => ["stageFit", "geographyFit"].includes(key) && score !== null && score < 50);
     for (const [key] of weak) {
       const target = key === "stageFit" ? bundle.thesis.stages.join(", ") : bundle.thesis.geographies.join(", ");
       if (target) {
