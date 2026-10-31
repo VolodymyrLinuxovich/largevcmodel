@@ -70,16 +70,15 @@ export function interpretPeopleSearchObjective(input: {
     ...parseStartupPersonTypes(startupCriteria.targetPersonTypes),
   ]);
 
-  const lower = query.toLowerCase();
   const stages = uniqueStrings([
     ...(filters?.stages ?? []),
-    ...STAGE_HINTS.filter((stage) => lower.includes(stage)),
+    ...STAGE_HINTS.filter((stage) => containsWords(query, stage)),
     ...stringsFromUnknown(startupCriteria.targetStages),
   ]).map((stage) => stage.replace("pre seed", "pre-seed"));
 
   const locations = uniqueStrings([
     ...(filters?.locations ?? []),
-    ...LOCATION_HINTS.filter((location) => new RegExp(`\\b${escapeRegExp(location)}\\b`, "i").test(query)),
+    ...LOCATION_HINTS.filter((location) => containsWords(query, location)),
     ...stringsFromUnknown(startupCriteria.targetLocations),
   ]);
 
@@ -91,7 +90,7 @@ export function interpretPeopleSearchObjective(input: {
 
   const industries = uniqueStrings([
     ...(filters?.industries ?? []),
-    ...INDUSTRY_HINTS.filter((industry) => lower.includes(industry)),
+    ...INDUSTRY_HINTS.filter((industry) => containsWords(query, industry)),
     ...stringsFromUnknown(startupCriteria.targetIndustries),
   ]);
 
@@ -258,6 +257,11 @@ function uniqueStrings(values: Array<string | null | undefined>) {
         .map((value) => value.replace(/\s+/g, " ")),
     ),
   );
+}
+
+/** Whole word match, so "aerospace" does not yield "space" and "defense aircraft" does not yield "defense ai". */
+function containsWords(query: string, phrase: string) {
+  return new RegExp(`\\b${escapeRegExp(phrase)}\\b`, "i").test(query);
 }
 
 function escapeRegExp(value: string) {
