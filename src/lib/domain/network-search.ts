@@ -137,6 +137,10 @@ const STOPWORDS = new Set([
   "work",
   "spoke",
   "emailed",
+  // Interaction verbs are read as interaction and stage criteria, not topics.
+  "met",
+  "meet",
+  "raised",
   "last",
   "recent",
   "recently",
