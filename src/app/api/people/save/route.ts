@@ -26,6 +26,17 @@ export async function POST(request: Request) {
       select: { id: true, fullName: true },
     });
     if (!person) return badRequest("Person not found.");
+    const { startupId, searchRunId, searchResultId } = body.data;
+    const [startup, searchRun, searchResult] = await Promise.all([
+      startupId ? prisma.startupProfile.findFirst({ where: { id: startupId, userId: user.id }, select: { id: true } }) : null,
+      searchRunId ? prisma.peopleSearchRun.findFirst({ where: { id: searchRunId, userId: user.id }, select: { id: true } }) : null,
+      searchResultId
+        ? prisma.peopleSearchResult.findFirst({ where: { id: searchResultId, userId: user.id }, select: { id: true } })
+        : null,
+    ]);
+    if (startupId && !startup) return badRequest("Startup not found.");
+    if (searchRunId && !searchRun) return badRequest("Search run not found.");
+    if (searchResultId && !searchResult) return badRequest("Search result not found.");
     const list =
       body.data.listId
         ? await prisma.savedPeopleList.findFirst({ where: { id: body.data.listId, userId: user.id } })
