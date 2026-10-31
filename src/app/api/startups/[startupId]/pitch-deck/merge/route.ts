@@ -1,5 +1,5 @@
 import { requireCurrentUser } from "@/lib/auth/current-user";
-import { badRequest, ok, serverError } from "@/lib/api/respond";
+import { badRequest, notFound, ok, serverError } from "@/lib/api/respond";
 import { audit } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
 import { extractionMergeSchema, mergePitchDeckExtraction } from "@/lib/startups/pitch-deck";
@@ -10,8 +10,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ sta
     const { startupId } = await params;
     const body = extractionMergeSchema.safeParse(await request.json());
     if (!body.success) return badRequest("Invalid extraction merge request", body.error.flatten());
-    const startup = await mergePitchDeckExtraction(prisma, user.id, body.data);
-    if (startup.id !== startupId) return badRequest("Extraction does not belong to this startup.");
+    const startup = await mergePitchDeckExtraction(prisma, user.id, startupId, body.data);
+    if (!startup) return notFound("Pitch deck extraction not found for this startup.");
     await audit(prisma, {
       userId: user.id,
       actor: user.email,
