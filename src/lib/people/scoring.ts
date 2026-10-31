@@ -211,10 +211,11 @@ function stageOverlap(stage: string | null, preferred: string[]) {
 function checkSizeScore(startupMin: number | null, startupMax: number | null, personMin: number | null, personMax: number | null) {
   if (!startupMin && !startupMax && !personMin && !personMax) return 0;
   if ((!startupMin && !startupMax) || (!personMin && !personMax)) return 20;
+  // A range with only a minimum is open above, as a range with only a maximum is open below.
   const aMin = startupMin ?? 0;
-  const aMax = startupMax ?? startupMin ?? 10_000_000_000;
+  const aMax = startupMax ?? Number.POSITIVE_INFINITY;
   const bMin = personMin ?? 0;
-  const bMax = personMax ?? personMin ?? 10_000_000_000;
+  const bMax = personMax ?? Number.POSITIVE_INFINITY;
   return Math.max(aMin, bMin) <= Math.min(aMax, bMax) ? 100 : 10;
 }
 

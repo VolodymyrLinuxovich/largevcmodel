@@ -114,6 +114,18 @@ describe("external people discovery architecture", () => {
     expect(keys).toEqual(expect.arrayContaining(["product", "industry", "fundingTarget", "team"]));
     expect(keys).not.toContain("customerCount");
   });
+
+  it("treats a check range with only a minimum as open above", () => {
+    const checkScore = (startup: StartupProfile, person: Partial<DiscoveredPerson>) =>
+      calculatePeopleFitScore({ startup, person: personFixture({ personTypes: [PersonType.INVESTOR], ...person }) }).components.find(
+        (component) => component.key === "checkSize",
+      )?.score;
+    const atLeastOneMillion = { ...startupFixture(), minCheckSize: 1_000_000, maxCheckSize: null };
+
+    expect(checkScore(atLeastOneMillion, { minCheckSize: 2_000_000, maxCheckSize: 5_000_000 })).toBe(100);
+    expect(checkScore(atLeastOneMillion, { minCheckSize: 250_000, maxCheckSize: 500_000 })).toBe(10);
+    expect(checkScore({ ...startupFixture(), minCheckSize: 5_000_000, maxCheckSize: 10_000_000 }, { minCheckSize: 1_000_000, maxCheckSize: null })).toBe(100);
+  });
 });
 
 function startupFixture(): StartupProfile {
