@@ -20,10 +20,9 @@ import {
   expandStageTerms,
   isInvestmentPersonType,
   normalizePersonTypes,
-  normalizeTerm,
   splitListInput,
 } from "./search-taxonomy";
-import { domainFromUrlOrEmail } from "./normalization";
+import { domainFromUrlOrEmail, normalizedName } from "./normalization";
 
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const DEFAULT_MODEL = "gpt-4o-mini";
@@ -738,7 +737,7 @@ function parseOrganizations(json: unknown): CandidateParseResult<PeopleProviderO
 function parsePeople(json: unknown, organizations: PeopleProviderOrganization[], input: PeopleProviderSearchInput): CandidateParseResult<PeopleProviderPerson> {
   const root = z.object({ people: z.array(z.unknown()).default([]), candidates: z.array(z.unknown()).default([]) }).passthrough().safeParse(json);
   const raw = root.success ? [...root.data.people, ...root.data.candidates] : [];
-  const organizationByName = new Map(organizations.map((organization) => [normalizeTerm(organization.name), organization]));
+  const organizationByName = new Map(organizations.map((organization) => [normalizedName(organization.name), organization]));
   const values: PeopleProviderPerson[] = [];
   const rejections: PeopleSearchRejection[] = [];
   let validNames = 0;
@@ -772,7 +771,7 @@ function normalizeRawPerson(raw: unknown, organizationByName: Map<string, People
   const optionalFields = objectRecord(data.optionalSourceSupportedFields);
   const rawOrganization = objectRecord(data.currentOrganization ?? data.organization);
   const organizationName = stringValue(data.currentOrganizationName ?? data.organizationName ?? data.firm ?? data.fund ?? rawOrganization.name ?? (typeof data.organization === "string" ? data.organization : null));
-  const currentOrganization = organizationName ? organizationByName.get(normalizeTerm(organizationName)) ?? normalizeRawOrganization(rawOrganization.name ? rawOrganization : { name: organizationName }) : null;
+  const currentOrganization = organizationName ? organizationByName.get(normalizedName(organizationName)) ?? normalizeRawOrganization(rawOrganization.name ? rawOrganization : { name: organizationName }) : null;
   const currentTitle = stringValue(data.currentTitle ?? data.title ?? data.role);
   const explicitTypes = normalizePersonTypes(data.personTypes ?? data.personType ?? data.type);
   const personTypes = explicitTypes.length ? explicitTypes : isInvestmentPersonType([], currentTitle) ? [PersonType.INVESTOR] : [];
@@ -1042,8 +1041,8 @@ function dedupeProviderPeople(result: CandidateParseResult<PeopleProviderPerson>
 }
 
 function providerPersonKey(person: PeopleProviderPerson) {
-  const name = normalizeTerm(person.fullName);
-  const organization = normalizeTerm(person.currentOrganizationName ?? "");
+  const name = normalizedName(person.fullName);
+  const organization = normalizedName(person.currentOrganizationName ?? "");
   const linkedin = person.linkedinUrl ? canonicalUrl(person.linkedinUrl) : "";
   return [name, organization, linkedin].filter(Boolean).join("|");
 }

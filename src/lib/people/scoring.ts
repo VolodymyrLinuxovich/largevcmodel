@@ -1,6 +1,6 @@
 import { PersonType, type DiscoveredPerson, type PersonRelationshipEnrichment, type StartupProfile } from "@prisma/client";
 import { fullTextScore, semanticSimilarity } from "./semantic";
-import { expandGeographyTerms, expandIndustryTerms, expandStageTerms } from "./search-taxonomy";
+import { expandGeographyTerms, expandIndustryTerms, expandStageTerms, normalizeTerm } from "./search-taxonomy";
 
 export type CriterionState = {
   criterion: string;
@@ -202,18 +202,20 @@ function overlapScore(left: string[], right: string[]) {
 function stageOverlap(stage: string | null, preferred: string[]) {
   if (!stage && !preferred.length) return 0;
   if (!stage || !preferred.length) return 18;
-  const requested = expandStageTerms([stage]).map((item) => item.toLowerCase().replace(/\s+/g, "-"));
-  const available = expandStageTerms(preferred).map((item) => item.toLowerCase().replace(/\s+/g, "-"));
-  return requested.some((left) => available.some((right) => right.includes(left) || left.includes(right))) ? 100 : 15;
+  // Whole terms only: the seed aliases include "pre-series a", which contains "series a" as a substring.
+  const requested = expandStageTerms([stage]).map(normalizeTerm);
+  const available = new Set(expandStageTerms(preferred).map(normalizeTerm));
+  return requested.some((term) => available.has(term)) ? 100 : 15;
 }
 
 function checkSizeScore(startupMin: number | null, startupMax: number | null, personMin: number | null, personMax: number | null) {
   if (!startupMin && !startupMax && !personMin && !personMax) return 0;
   if ((!startupMin && !startupMax) || (!personMin && !personMax)) return 20;
+  // A range with only a minimum is open above, as a range with only a maximum is open below.
   const aMin = startupMin ?? 0;
-  const aMax = startupMax ?? startupMin ?? 10_000_000_000;
+  const aMax = startupMax ?? Number.POSITIVE_INFINITY;
   const bMin = personMin ?? 0;
-  const bMax = personMax ?? personMin ?? 10_000_000_000;
+  const bMax = personMax ?? Number.POSITIVE_INFINITY;
   return Math.max(aMin, bMin) <= Math.min(aMax, bMax) ? 100 : 10;
 }
 

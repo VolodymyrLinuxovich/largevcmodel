@@ -96,6 +96,9 @@ export type SensitiveFactKey = (typeof SENSITIVE_FACTS)[number]["key"];
 const GENERIC_CATEGORY = /^(|other|general|misc|miscellaneous|research|unknown|uncategorized)$/i;
 
 /** Category-first matching: claim wording is only consulted for uncategorized claims. */
+/** Risk topics, with plurals and every regulat word form. Shared by briefs and memos. */
+export const RISK_PATTERN = /\b(risks?|concerns?|litigations?|regulat\w*|churn|competition|competitors?|dependency|dependencies|lawsuits?)\b/i;
+
 export function matchesTopic(item: Pick<EvidenceItem, "category" | "text">, pattern: RegExp) {
   const category = (item.category ?? "").trim();
   return GENERIC_CATEGORY.test(category) ? pattern.test(item.text) : pattern.test(category);

@@ -62,7 +62,8 @@ export async function syncGoogleContacts(
           lowerEmail(person.emailAddresses?.find((email) => email.metadata?.primary)?.value) ?? emails[0] ?? null;
         const organization = person.organizations?.find((item) => item.current)?.name ?? person.organizations?.[0]?.name ?? null;
         const title = person.organizations?.find((item) => item.current)?.title ?? person.organizations?.[0]?.title ?? null;
-        const fullName = person.names?.find((name) => name.displayName)?.displayName ?? person.names?.[0]?.displayName ?? primaryEmail;
+        const googleName = person.names?.find((name) => name.displayName?.trim())?.displayName?.trim() || null;
+        const fullName = googleName ?? primaryEmail;
         const providerId = person.resourceName ?? primaryEmail ?? undefined;
 
         if (!providerId && !primaryEmail) continue;
@@ -70,6 +71,17 @@ export async function syncGoogleContacts(
         const existingByEmail = primaryEmail
           ? await prisma.contact.findUnique({ where: { userId_primaryEmail: { userId, primaryEmail } } })
           : null;
+
+        const existing =
+          existingByEmail ??
+          (providerId
+            ? await prisma.contact.findUnique({
+                where: { userId_source_providerId: { userId, source: ContactSource.GOOGLE_CONTACTS, providerId } },
+              })
+            : null);
+        // Keep addresses learned from other sources, such as Gmail, and add any new ones from Google.
+        const mergedEmails = Array.from(new Set([...emails, ...(existing?.emails ?? [])]));
+        const biography = person.biographies?.[0]?.value?.trim() || null;
 
         const where = existingByEmail
           ? { id: existingByEmail.id }
@@ -89,7 +101,7 @@ export async function syncGoogleContacts(
             organization,
             title,
             profileImageUrl: person.photos?.find((photo) => photo.metadata?.primary)?.url ?? person.photos?.[0]?.url ?? null,
-            notes: person.biographies?.[0]?.value ?? null,
+            notes: biography,
             groups: (person.memberships ?? [])
               .map((membership) => membership.contactGroupMembership?.contactGroupResourceName)
               .filter(Boolean) as string[],
@@ -98,13 +110,15 @@ export async function syncGoogleContacts(
           update: {
             sourceIntegrationId: integration.id,
             providerId,
-            fullName,
-            emails,
+            // A contact without a name in Google keeps the name stored in the CRM.
+            fullName: googleName ?? undefined,
+            emails: mergedEmails,
             phones: (person.phoneNumbers ?? []).map((phone) => phone.value).filter(Boolean) as string[],
             organization,
             title,
             profileImageUrl: person.photos?.find((photo) => photo.metadata?.primary)?.url ?? person.photos?.[0]?.url ?? null,
-            notes: person.biographies?.[0]?.value ?? null,
+            // Notes typed in the CRM win. A Google biography only fills empty notes.
+            notes: existing?.notes ? undefined : (biography ?? undefined),
             groups: (person.memberships ?? [])
               .map((membership) => membership.contactGroupMembership?.contactGroupResourceName)
               .filter(Boolean) as string[],
