@@ -177,7 +177,22 @@ const STOPWORDS = new Set([
   "months",
   "year",
   "semester",
+  "in",
+  "near",
+  "at",
+  "on",
+  "of",
+  "to",
 ]);
+
+// "in the last six months" and "in 2024" describe dates, not places.
+const NON_PLACE_START = /^(?:last|past|previous|next|recent|recently|this|today|yesterday|\d)/;
+
+function placeAfterPreposition(value: string) {
+  const place = value.replace(/^the\b\s*/, "");
+  if (!place || place.length > 40 || NON_PLACE_START.test(place)) return null;
+  return place;
+}
 
 const COMMON_GEOS = [
   "ukraine",
@@ -360,7 +375,8 @@ export function parseNetworkObjective(input: z.infer<typeof networkSearchRequest
     ...manual.geographies,
     // Whole words only, so "us" is not found inside "business" or "users".
     ...COMMON_GEOS.filter((geo) => new RegExp(`\\b${geo}\\b`).test(text)),
-    ...placesAfterPrepositions(text),
+    // Dates such as "in the last six months" or "in 2024" are dropped.
+    ...placesAfterPrepositions(text).map(placeAfterPreposition),
   ]);
   const institutions = unique([
     text.includes("berkeley") ? "Berkeley" : null,
