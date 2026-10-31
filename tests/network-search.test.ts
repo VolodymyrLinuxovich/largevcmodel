@@ -118,6 +118,12 @@ describe("general network search", () => {
     expect(results[0]).toMatchObject({ entityType: "MEETING" });
   });
 
+  it("matches common geographies as whole words only", () => {
+    expect(parseNetworkObjective({ query: "founders focused on business software", strictness: "balanced" }).geographies).toEqual([]);
+    expect(parseNetworkObjective({ query: "people who discussed AI agents with users", strictness: "balanced" }).geographies).toEqual([]);
+    expect(parseNetworkObjective({ query: "seed founders in the us", strictness: "balanced" }).geographies).toContain("us");
+  });
+
   it("handles geographic searches without swapped sector/geography filters", () => {
     const parsed = parseNetworkObjective({ query: "Find people in Europe working on robotics", sector: "Ukraine", strictness: "balanced" }, now);
     expect(parsed.geographies).toEqual(expect.arrayContaining(["Ukraine", "europe"]));

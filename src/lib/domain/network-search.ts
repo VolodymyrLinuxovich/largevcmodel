@@ -348,7 +348,8 @@ export function parseNetworkObjective(input: z.infer<typeof networkSearchRequest
   ]);
   const geographies = unique([
     ...manual.geographies,
-    ...COMMON_GEOS.filter((geo) => text.includes(geo)),
+    // Whole words only, so "us" is not found inside "business" or "users".
+    ...COMMON_GEOS.filter((geo) => new RegExp(`\\b${geo}\\b`).test(text)),
     ...placesAfterPrepositions(text),
   ]);
   const institutions = unique([
