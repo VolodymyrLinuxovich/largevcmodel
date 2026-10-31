@@ -41,7 +41,7 @@ describe("research persistence", () => {
       contact: { findFirst: vi.fn().mockResolvedValue({ id: "c1", fullName: "Founder", organization: "Acme", companyId: "co1", company: null }) },
       company: { findFirst: vi.fn().mockResolvedValue(null) },
       researchRun: { create: vi.fn().mockResolvedValue({ id: "run-1" }), update: vi.fn(), findUnique: vi.fn().mockResolvedValue({ id: "run-1" }) },
-      source: { upsert: sourceUpsert },
+      source: { upsert: sourceUpsert, findUnique: vi.fn().mockResolvedValue(null) },
       researchClaim: { create: claimCreate },
       claimSource: { create: vi.fn() },
       auditEvent: { create: vi.fn() },

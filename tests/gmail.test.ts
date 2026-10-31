@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { latestMessageDate } from "@/lib/google/gmail";
+import { emailsFromHeader, latestMessageDate } from "@/lib/google/gmail";
 
 describe("Gmail thread timestamps", () => {
   it("keeps the newest message date when sync pages arrive out of order", () => {
@@ -15,5 +15,19 @@ describe("Gmail thread timestamps", () => {
 
     expect(latestMessageDate(null, incoming)).toBe(incoming);
     expect(latestMessageDate(incoming, null)).toBe(incoming);
+  });
+});
+
+describe("Gmail address headers", () => {
+  it("does not split on a comma inside a quoted display name", () => {
+    expect(emailsFromHeader('"Doe, John" <john@acme.com>, Jane <jane@acme.com>')).toEqual(["john@acme.com", "jane@acme.com"]);
+  });
+
+  it("handles escaped quotes and bare addresses", () => {
+    expect(emailsFromHeader('"Smith \\"JS\\", Jr" <js@acme.com>, bob@acme.com')).toEqual(["js@acme.com", "bob@acme.com"]);
+  });
+
+  it("returns an empty list for a missing header", () => {
+    expect(emailsFromHeader(null)).toEqual([]);
   });
 });

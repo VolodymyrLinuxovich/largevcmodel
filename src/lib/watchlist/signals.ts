@@ -40,7 +40,7 @@ export type SignalRecords = {
   }>;
   stageEvents: Array<{ id: string; opportunityId: string; companyId: string; companyName: string; fromStage: string | null; toStage: string | null; actor: string; createdAt: Date }>;
   /** Fit scores ordered oldest to newest per company, including the score before the window for deltas. */
-  fitScores: Array<{ id: string; companyId: string; overall: number; confidence: number; modelOrProvider: string; calculatedAt: Date }>;
+  fitScores: Array<{ id: string; companyId: string; thesisId?: string | null; overall: number; confidence: number; modelOrProvider: string; calculatedAt: Date }>;
 };
 
 export type SignalCandidate = {
@@ -180,7 +180,8 @@ export function deriveSignals(targets: WatchTarget[], records: SignalRecords): S
     if (companyId) {
       const scores = records.fitScores.filter((score) => score.companyId === companyId).sort((a, b) => a.calculatedAt.getTime() - b.calculatedAt.getTime());
       scores.forEach((score, index) => {
-        const previous = scores[index - 1];
+        // Scores for different theses measure different things, so only compare within one thesis.
+        const previous = scores.slice(0, index).findLast((earlier) => (earlier.thesisId ?? null) === (score.thesisId ?? null));
         if (!previous || !isNew(score.calculatedAt)) return;
         const delta = score.overall - previous.overall;
         if (Math.abs(delta) < FIT_SCORE_SIGNAL_DELTA) return;

@@ -190,7 +190,8 @@ async function processJob(prisma: PrismaClient, jobId: string) {
       },
     });
     await prisma.integration.updateMany({
-      where: { userId: job.userId, provider: "google", service },
+      // Leave a disconnected integration's status alone.
+      where: { userId: job.userId, provider: "google", service, status: IntegrationStatus.CONNECTED },
       data: {
         syncStatus: "error",
         lastError: message,
@@ -214,27 +215,41 @@ export async function processNextSyncJobs(
   prisma: PrismaClient,
   input: { userId: string; maxJobs?: number } = { userId: "" },
 ) {
+  // Jobs for a service that is not connected would only fail, so they wait until it is connected again.
+  const connected = await prisma.integration.findMany({
+    where: { userId: input.userId, provider: "google", status: IntegrationStatus.CONNECTED },
+    select: { service: true },
+  });
+  const providers = connected.map((integration) => serviceToProvider[integration.service]);
+  if (!providers.length) return { processed: 0, failed: 0, remaining: 0 };
+
   const jobs = await prisma.syncJob.findMany({
     where: {
       userId: input.userId,
+      provider: { in: providers },
       status: { in: [SyncJobStatus.PENDING, SyncJobStatus.FAILED] },
     },
     orderBy: [{ status: "asc" }, { createdAt: "asc" }],
     take: input.maxJobs ?? 3,
   });
 
-  const results = [];
+  let processed = 0;
+  let failed = 0;
   for (const job of jobs) {
-    results.push(await processJob(prisma, job.id));
+    try {
+      if (await processJob(prisma, job.id)) processed += 1;
+    } catch {
+      // processJob already stored the failure on the job. Keep going with the rest of the batch.
+      failed += 1;
+    }
   }
 
   const remaining = await prisma.syncJob.count({
-    where: { userId: input.userId, status: SyncJobStatus.PENDING },
+    where: { userId: input.userId, provider: { in: providers }, status: SyncJobStatus.PENDING },
   });
-  const processed = results.filter(Boolean).length;
   if (processed) await refreshWatchSignalsAfterSync(prisma, input.userId);
 
-  return { processed, remaining };
+  return { processed, failed, remaining };
 }
 
 /** Newly synced records can produce watchlist signals. A detector failure is reported, not hidden, but does not fail the sync. */
