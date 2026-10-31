@@ -103,6 +103,12 @@ export async function researchSubject(prisma: PrismaClient, userId: string, inpu
     const sources = await Promise.all(
       dedupeSources(result.sources).map(async (source) => {
         const canonicalUrl = canonicalizeUrl(source.url);
+        // A source is shared by URL across research runs and subjects. Keep the claims and
+        // details it already supports instead of replacing them with this run's values.
+        const existing = await prisma.source.findUnique({
+          where: { userId_canonicalUrl: { userId, canonicalUrl } },
+          select: { supportsClaims: true, publisher: true, publishedAt: true, snippet: true },
+        });
         return prisma.source.upsert({
           where: { userId_canonicalUrl: { userId, canonicalUrl } },
           create: {
@@ -122,13 +128,13 @@ export async function researchSubject(prisma: PrismaClient, userId: string, inpu
           },
           update: {
             title: source.title,
-            publisher: source.publisher ?? null,
-            publishedAt: source.publishedAt ? new Date(source.publishedAt) : null,
+            publisher: source.publisher ?? existing?.publisher ?? null,
+            publishedAt: source.publishedAt ? new Date(source.publishedAt) : (existing?.publishedAt ?? null),
             accessedAt: new Date(source.accessedAt),
             sourceType: source.sourceType,
             origin: source.origin,
-            snippet: source.snippet ?? null,
-            supportsClaims: source.supportsClaims,
+            snippet: source.snippet ?? existing?.snippet ?? null,
+            supportsClaims: Array.from(new Set([...(existing?.supportsClaims ?? []), ...source.supportsClaims])),
           },
         });
       }),
