@@ -2,7 +2,7 @@ import { OutreachStatus } from "@prisma/client";
 import { z } from "zod";
 import { audit } from "@/lib/audit";
 import { requireCurrentUser } from "@/lib/auth/current-user";
-import { badRequest, ok, serverError } from "@/lib/api/respond";
+import { badRequest, notFound, ok, serverError } from "@/lib/api/respond";
 import { classifyReply } from "@/lib/domain/replies";
 import { prisma } from "@/lib/prisma";
 
@@ -18,6 +18,14 @@ export async function POST(request: Request) {
     const user = await requireCurrentUser();
     const parsed = requestSchema.safeParse(await request.json());
     if (!parsed.success) return badRequest("Invalid reply request", parsed.error.flatten());
+    if (parsed.data.contactId) {
+      const contact = await prisma.contact.findFirst({ where: { id: parsed.data.contactId, userId: user.id } });
+      if (!contact) return notFound("Contact not found");
+    }
+    if (parsed.data.draftId) {
+      const draft = await prisma.outreachDraft.findFirst({ where: { id: parsed.data.draftId, userId: user.id } });
+      if (!draft) return notFound("Outreach draft not found");
+    }
     const classification = classifyReply(parsed.data.bodySnippet);
     const reply = await prisma.reply.create({
       data: {
