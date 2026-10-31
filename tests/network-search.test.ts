@@ -148,6 +148,29 @@ describe("general network search", () => {
     expect(parsed.topics).not.toContain("Ukraine");
   });
 
+  it("does not keep interaction verbs like met or raised as topics", () => {
+    const parsed = parseNetworkObjective({ query: "Find founders I met who raised a seed round", strictness: "balanced" }, now);
+    expect(parsed.topics).not.toContain("met");
+    expect(parsed.topics).not.toContain("raised");
+    expect(parsed.positiveKeywords).not.toContain("met");
+    expect(parsed.interactionTypes).toContain("meeting");
+    expect(parsed.fundingStages).toContain("seed");
+  });
+
+  it("reads a sector after working in or investors in as a topic, not a geography", () => {
+    const climate = parseNetworkObjective({ query: "Find founders working in climate in Berlin", strictness: "balanced" }, now);
+    expect(climate.geographies).toEqual(["berlin"]);
+    expect(climate.topics).toContain("climate");
+
+    const fintech = parseNetworkObjective({ query: "Find investors in fintech", strictness: "balanced" }, now);
+    expect(fintech.geographies).toEqual([]);
+    expect(fintech.topics).toContain("fintech");
+
+    const kyiv = parseNetworkObjective({ query: "Find founders in Kyiv interested in robotics", strictness: "balanced" }, now);
+    expect(kyiv.geographies).toEqual(["kyiv"]);
+    expect(kyiv.topics).toContain("robotics");
+  });
+
   it("does not turn prepositions and date phrases into topics or geographies", () => {
     const parsed = parseNetworkObjective({ query: "Find founders I met in the last six months", strictness: "balanced" }, now);
     expect(parsed.geographies).toEqual([]);

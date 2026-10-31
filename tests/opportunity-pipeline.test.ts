@@ -131,6 +131,15 @@ describe("opportunity input validation", () => {
     expect(parsed.nextActionAt).toEqual(new Date("2026-10-01T00:00:00.000Z"));
   });
 
+  it("rejects date-only values for days that do not exist", () => {
+    for (const nextActionAt of ["2026-02-31", "2026-04-31", "2026-13-01", "2026-00-10"]) {
+      expect(createOpportunitySchema.safeParse({ company: { name: "Acme" }, nextActionAt }).success).toBe(false);
+    }
+    expect(createOpportunitySchema.parse({ company: { name: "Acme" }, nextActionAt: "2028-02-29" }).nextActionAt).toEqual(
+      new Date("2028-02-29T00:00:00.000Z"),
+    );
+  });
+
   it("requires a version and at least one field for updates, and a known stage for stage changes", () => {
     expect(updateOpportunitySchema.safeParse({ expectedVersion: 1 }).success).toBe(false);
     expect(updateOpportunitySchema.safeParse({ priority: "HIGH" }).success).toBe(false);

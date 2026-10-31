@@ -33,12 +33,54 @@ function emailFromHeader(value?: string | null) {
   return (match?.[1] ?? value).split(",")[0]?.trim().toLowerCase() || null;
 }
 
-function emailsFromHeader(value?: string | null) {
+// Split an address list on commas that are outside quotes and angle brackets.
+export function splitAddressList(value: string) {
+  const parts: string[] = [];
+  let current = "";
+  let inQuotes = false;
+  let inAngle = false;
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    if (char === "\\" && inQuotes && index + 1 < value.length) {
+      current += char + value[index + 1];
+      index += 1;
+      continue;
+    }
+    if (char === '"' && !inAngle) inQuotes = !inQuotes;
+    else if (char === "<" && !inQuotes) inAngle = true;
+    else if (char === ">" && !inQuotes) inAngle = false;
+    if (char === "," && !inQuotes && !inAngle) {
+      parts.push(current);
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+  parts.push(current);
+  return parts.map((part) => part.trim()).filter(Boolean);
+}
+
+export function emailsFromHeader(value?: string | null) {
   if (!value) return [];
-  return value
-    .split(",")
+  return splitAddressList(value)
     .map((part) => emailFromHeader(part))
     .filter(Boolean) as string[];
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Finds the display name next to an address, as in "Ada Lovelace" <ada@example.com>.
+export function displayNameFromHeaders(values: Array<string | null | undefined>, email: string) {
+  const pattern = new RegExp(`(?:"((?:[^"\\\\]|\\\\.)*)"|([^",<>]+?))\\s*<\\s*${escapeRegExp(email)}\\s*>`, "i");
+  for (const value of values) {
+    const match = value?.match(pattern);
+    if (!match) continue;
+    const name = (match[1] ?? match[2] ?? "").replace(/\\(.)/g, "$1").replace(/\s+/g, " ").trim();
+    if (name && name.toLowerCase() !== email.toLowerCase()) return name;
+  }
+  return null;
 }
 
 function uniqueEmails(values: Array<string | null | undefined>) {
@@ -135,7 +177,11 @@ export async function syncGmail(
       });
       let contactId: string | undefined;
       if (contactEmail) {
-        const contact = await prisma.contact.upsert({
+        const displayName = displayNameFromHeaders(
+          [header(message, "From"), header(message, "To"), header(message, "Cc")],
+          contactEmail,
+        );
+        let contact = await prisma.contact.upsert({
           where: { userId_primaryEmail: { userId, primaryEmail: contactEmail } },
           create: {
             userId,
@@ -144,7 +190,7 @@ export async function syncGmail(
             providerId: contactEmail,
             primaryEmail: contactEmail,
             emails: [contactEmail],
-            fullName: contactEmail,
+            fullName: displayName ?? contactEmail,
             interactionCount: 1,
             lastInteractionAt: occurredAt,
           },
@@ -152,6 +198,10 @@ export async function syncGmail(
             interactionCount: existingMessage ? undefined : { increment: 1 },
           },
         });
+        // Contacts named after their address get the real name once a header shows it.
+        if (displayName && (!contact.fullName || contact.fullName.toLowerCase() === contactEmail)) {
+          contact = await prisma.contact.update({ where: { id: contact.id }, data: { fullName: displayName } });
+        }
         contactId = contact.id;
         touchedContactIds.add(contact.id);
         await advanceLastInteraction(prisma, userId, contact.id, occurredAt);
