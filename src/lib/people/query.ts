@@ -207,7 +207,7 @@ function extractExcludedTerms(query: string) {
 }
 
 function parseCheckRange(query: string) {
-  const between = query.match(/\bbetween\s+\$?([0-9.]+)\s*([kKmM]?)\s+(?:and|-|to)\s+\$?([0-9.]+)\s*([kKmM]?)/);
+  const between = query.match(/\bbetween\s+\$?([0-9.]+)\s*([kKmM]?)\s+(?:and|-|to)\s+\$?([0-9.]+)\s*([kKmM]?)/i);
   if (between) {
     return { min: money(between[1]!, between[2]!), max: money(between[3]!, between[4]!) };
   }
