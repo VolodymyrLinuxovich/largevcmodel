@@ -91,6 +91,20 @@ describe("external people discovery architecture", () => {
     );
   });
 
+  it("scores stage fit on whole stage terms, so seed investors do not match a Series A round", () => {
+    const seriesA = { ...startupFixture(), fundingStage: "Series A" };
+    const stageScore = (startup: StartupProfile, preferredStages: string[]) =>
+      calculatePeopleFitScore({ startup, person: personFixture({ personTypes: [PersonType.INVESTOR], preferredStages }) }).components.find(
+        (component) => component.key === "stage",
+      )?.score;
+
+    expect(stageScore(seriesA, ["seed"])).toBe(15);
+    expect(stageScore(seriesA, ["Pre-Series A"])).toBe(15);
+    expect(stageScore(seriesA, ["Series A", "Series B"])).toBe(100);
+    expect(stageScore(startupFixture(), ["Pre-Seed"])).toBe(100);
+    expect(stageScore(startupFixture(), ["Series A"])).toBe(15);
+  });
+
   it("extracts pitch-deck fields conservatively without fabricating absent facts", () => {
     const fields = extractStartupFields(
       "Product: autonomous sensor fusion for field teams. Industry: defense technology. Raising $1.5M. Team: ex robotics engineers.",
