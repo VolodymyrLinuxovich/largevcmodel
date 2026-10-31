@@ -26,6 +26,24 @@ export function canonicalUrl(url: string) {
   }
 }
 
+/**
+ * Stored spellings of the same profile URL. LinkedIn URLs are saved as the provider sent them, so
+ * an exact lookup misses the person when one copy has www or a trailing slash and the other does not.
+ */
+export function linkedinUrlVariants(url: string) {
+  const canonical = canonicalUrl(url);
+  const match = /^https?:\/\/([^/]+)(.*)$/i.exec(canonical);
+  if (!match) return [url, canonical];
+  const [, host, path] = match;
+  const variants = new Set([url, canonical]);
+  for (const protocol of ["https", "http"]) {
+    for (const prefix of ["", "www."]) {
+      for (const suffix of ["", "/"]) variants.add(`${protocol}://${prefix}${host}${path}${suffix}`);
+    }
+  }
+  return Array.from(variants);
+}
+
 export function domainFromUrlOrEmail(value?: string | null) {
   if (!value) return null;
   const email = normalizeEmail(value);
@@ -206,7 +224,7 @@ export async function persistProviderPerson(
     where: {
       userId,
       OR: [
-        person.linkedinUrl ? { linkedinUrl: person.linkedinUrl } : undefined,
+        person.linkedinUrl ? { linkedinUrl: { in: linkedinUrlVariants(person.linkedinUrl) } } : undefined,
         (person.emailAddresses ?? []).length ? { emailAddresses: { hasSome: person.emailAddresses ?? [] } } : undefined,
         { fullName: { equals: person.fullName, mode: "insensitive" } },
       ].filter(Boolean) as Prisma.DiscoveredPersonWhereInput[],
