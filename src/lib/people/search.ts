@@ -517,8 +517,10 @@ export function evaluateHardFilters(
     addStrictReason(reasons, "title_mismatch", matchesAnyExpanded(filters.titles, [person.currentTitle ?? ""]));
     addStrictReason(reasons, "technology_mismatch", matchesAnyExpanded(filters.technologyKeywords, [...person.technologies, ...person.keywords, person.biography ?? ""], expandIndustryTerms));
     addStrictReason(reasons, "portfolio_mismatch", matchesAnyExpanded(filters.portfolioKeywords, [...person.portfolioCompanies, ...person.notableInvestments, person.notableExperience ?? ""]));
-    if (filters.minCheckSize && (!person.maxCheckSize || person.maxCheckSize < filters.minCheckSize)) reasons.push("min_check_size_mismatch");
-    if (filters.maxCheckSize && (!person.minCheckSize || person.minCheckSize > filters.maxCheckSize)) reasons.push("max_check_size_mismatch");
+    // A range with only one bound is open on the other side. A person with no range at all still fails.
+    const hasCheckRange = Boolean(person.minCheckSize || person.maxCheckSize);
+    if (filters.minCheckSize && (!hasCheckRange || (person.maxCheckSize && person.maxCheckSize < filters.minCheckSize))) reasons.push("min_check_size_mismatch");
+    if (filters.maxCheckSize && (!hasCheckRange || (person.minCheckSize && person.minCheckSize > filters.maxCheckSize))) reasons.push("max_check_size_mismatch");
   }
 
   return { eligible: reasons.length === 0, reasons };

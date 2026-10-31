@@ -179,6 +179,25 @@ describe("external people search pipeline", () => {
     expect(result.reasons).toEqual(expect.arrayContaining(["industry_mismatch_unknown", "stage_mismatch_unknown", "geography_mismatch_unknown"]));
   });
 
+  it("reads a check range with one bound as open on the other side in strict mode", () => {
+    const input = screenshotSearchInput({ matchMode: "strict", minCheckSize: 2_000_000, maxCheckSize: 5_000_000 });
+    const startup = searchOnlyStartupContext("user", input, input.interpreted);
+    const reasonsFor = (person: Partial<DiscoveredPerson>) =>
+      evaluateHardFilters(
+        discoveredInvestor({ industries: ["defense technology"], preferredStages: ["seed"], location: "London", ...person }),
+        emptyRelationship(),
+        startup,
+        input.interpreted,
+        input.filters,
+      ).reasons.filter((reason) => reason.includes("check_size"));
+
+    expect(reasonsFor({ minCheckSize: 1_000_000, maxCheckSize: null })).toEqual([]);
+    expect(reasonsFor({ minCheckSize: null, maxCheckSize: 3_000_000 })).toEqual([]);
+    expect(reasonsFor({ minCheckSize: 6_000_000, maxCheckSize: null })).toEqual(["max_check_size_mismatch"]);
+    expect(reasonsFor({ minCheckSize: null, maxCheckSize: 1_000_000 })).toEqual(["min_check_size_mismatch"]);
+    expect(reasonsFor({ minCheckSize: null, maxCheckSize: null })).toEqual(["min_check_size_mismatch", "max_check_size_mismatch"]);
+  });
+
   it("keeps a source-backed partial investor for the screenshot query and records unknowns in scoring", () => {
     const input = screenshotSearchInput();
     const startup = searchOnlyStartupContext("user", input, input.interpreted);
