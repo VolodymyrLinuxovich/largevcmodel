@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { PersonType, type DiscoveredPerson, type PersonRelationshipEnrichment } from "@prisma/client";
 import { buildPeopleDiscoveryBatchesForTest, buildPeopleResearchQueries, dedupeProviderPeopleForTest, parsePeopleDiscoveryJsonForTest, summarizeOpenAIResponseForTest } from "@/lib/people/openai";
+import { fingerprintPerson } from "@/lib/people/entity-resolution";
+import { normalizedName } from "@/lib/people/normalization";
 import { interpretPeopleSearchObjective } from "@/lib/people/query";
 import { calculatePeopleFitScore } from "@/lib/people/scoring";
 import { evaluateHardFilters, searchOnlyStartupContext } from "@/lib/people/search";
@@ -248,6 +250,27 @@ describe("external people search pipeline", () => {
 
     expect(deduped.values.map((person) => person.fullName)).toEqual(["Alice Morgan", "Brian Shah"]);
     expect(deduped.rejections).toHaveLength(0);
+  });
+
+  it("keeps distinct people whose names use a non Latin script", () => {
+    const parsed = parsePeopleDiscoveryJsonForTest({
+      people: [
+        sourceBackedRawInvestor({ fullName: "Олена Коваль", currentOrganizationName: "Frontier Defence Ventures" }),
+        sourceBackedRawInvestor({ fullName: "Іван Петренко", currentOrganizationName: "Frontier Defence Ventures" }),
+        sourceBackedRawInvestor({ fullName: "Олена Коваль", currentOrganizationName: "Frontier Defence Ventures" }),
+      ],
+    }, providerInput());
+    const deduped = dedupeProviderPeopleForTest(parsed);
+
+    expect(deduped.values.map((person) => person.fullName)).toEqual(["Олена Коваль", "Іван Петренко"]);
+    expect(deduped.rejections).toEqual([expect.objectContaining({ candidate: "Олена Коваль", reasons: ["duplicate_identity"] })]);
+  });
+
+  it("normalizes names from every script without dropping letters", () => {
+    expect(normalizedName("Олена  Коваль")).toBe("олена коваль");
+    expect(normalizedName("José García")).toBe("jose garcia");
+    expect(normalizedName("Іван Петренко")).not.toBe(normalizedName("Олена Коваль"));
+    expect(fingerprintPerson({ fullName: "Олена Коваль", currentOrganizationName: "Fund" })).toBe("олена коваль|fund");
   });
 });
 
