@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { PersonType, type DiscoveredPerson, type PersonRelationshipEnrichment } from "@prisma/client";
 import { buildPeopleDiscoveryBatchesForTest, buildPeopleResearchQueries, dedupeProviderPeopleForTest, parsePeopleDiscoveryJsonForTest, summarizeOpenAIResponseForTest } from "@/lib/people/openai";
+import { fingerprintPerson } from "@/lib/people/entity-resolution";
+import { normalizedName } from "@/lib/people/normalization";
 import { interpretPeopleSearchObjective } from "@/lib/people/query";
 import { calculatePeopleFitScore } from "@/lib/people/scoring";
 import { evaluateHardFilters, searchOnlyStartupContext } from "@/lib/people/search";
@@ -34,6 +36,29 @@ describe("external people search pipeline", () => {
     expect(interpretPeopleSearchObjective({ query: "Find investors in defense aircraft" }).industries).toEqual([]);
     expect(interpretPeopleSearchObjective({ query: "Find space and climate investors" }).industries).toEqual(["climate", "space"]);
     expect(interpretPeopleSearchObjective({ query: "Find Defense AI investors at Series A" })).toMatchObject({ industries: ["defense ai"], stages: ["series a"] });
+  });
+
+  it("matches strict filter terms as whole words and whole stages", () => {
+    expect(matchesAnyExpanded(["AI"], ["Retail"], expandIndustryTerms)).toBe(false);
+    expect(matchesAnyExpanded(["US"], ["Russia"], expandGeographyTerms)).toBe(false);
+    expect(matchesAnyExpanded(["Series A"], ["Seed"], expandStageTerms, { exact: true })).toBe(false);
+    expect(matchesAnyExpanded(["Seed"], ["Series A"], expandStageTerms, { exact: true })).toBe(false);
+    expect(matchesAnyExpanded(["Seed"], ["pre-Series A"], expandStageTerms, { exact: true })).toBe(true);
+    expect(matchesAnyExpanded(["Series A"], ["Series A"], expandStageTerms, { exact: true })).toBe(true);
+    expect(matchesAnyExpanded(["AI"], ["Industrial AI software"], expandIndustryTerms)).toBe(true);
+    expect(matchesAnyExpanded(["Sequoia"], ["Sequoia Capital"])).toBe(true);
+  });
+
+  it("rejects seed only investors from a strict Series A search", () => {
+    const input = screenshotSearchInput({ matchMode: "strict", stages: "Series A", industries: "AI" });
+    const startup = searchOnlyStartupContext("user", input, input.interpreted);
+    const seedRetail = discoveredInvestor({ preferredStages: ["Seed"], industries: ["Retail"], location: "London" });
+    const seriesAAi = discoveredInvestor({ preferredStages: ["Series A"], industries: ["AI"], location: "London" });
+
+    expect(evaluateHardFilters(seedRetail, emptyRelationship(), startup, input.interpreted, input.filters).reasons).toEqual(
+      expect.arrayContaining(["stage_mismatch", "industry_mismatch"]),
+    );
+    expect(evaluateHardFilters(seriesAAi, emptyRelationship(), startup, input.interpreted, input.filters)).toMatchObject({ eligible: true });
   });
 
   it("does not let relationship Any filter external candidates", () => {
@@ -161,6 +186,25 @@ describe("external people search pipeline", () => {
     expect(result.reasons).toEqual(expect.arrayContaining(["industry_mismatch_unknown", "stage_mismatch_unknown", "geography_mismatch_unknown"]));
   });
 
+  it("reads a check range with one bound as open on the other side in strict mode", () => {
+    const input = screenshotSearchInput({ matchMode: "strict", minCheckSize: 2_000_000, maxCheckSize: 5_000_000 });
+    const startup = searchOnlyStartupContext("user", input, input.interpreted);
+    const reasonsFor = (person: Partial<DiscoveredPerson>) =>
+      evaluateHardFilters(
+        discoveredInvestor({ industries: ["defense technology"], preferredStages: ["seed"], location: "London", ...person }),
+        emptyRelationship(),
+        startup,
+        input.interpreted,
+        input.filters,
+      ).reasons.filter((reason) => reason.includes("check_size"));
+
+    expect(reasonsFor({ minCheckSize: 1_000_000, maxCheckSize: null })).toEqual([]);
+    expect(reasonsFor({ minCheckSize: null, maxCheckSize: 3_000_000 })).toEqual([]);
+    expect(reasonsFor({ minCheckSize: 6_000_000, maxCheckSize: null })).toEqual(["max_check_size_mismatch"]);
+    expect(reasonsFor({ minCheckSize: null, maxCheckSize: 1_000_000 })).toEqual(["min_check_size_mismatch"]);
+    expect(reasonsFor({ minCheckSize: null, maxCheckSize: null })).toEqual(["min_check_size_mismatch", "max_check_size_mismatch"]);
+  });
+
   it("keeps a source-backed partial investor for the screenshot query and records unknowns in scoring", () => {
     const input = screenshotSearchInput();
     const startup = searchOnlyStartupContext("user", input, input.interpreted);
@@ -232,6 +276,27 @@ describe("external people search pipeline", () => {
 
     expect(deduped.values.map((person) => person.fullName)).toEqual(["Alice Morgan", "Brian Shah"]);
     expect(deduped.rejections).toHaveLength(0);
+  });
+
+  it("keeps distinct people whose names use a non Latin script", () => {
+    const parsed = parsePeopleDiscoveryJsonForTest({
+      people: [
+        sourceBackedRawInvestor({ fullName: "Олена Коваль", currentOrganizationName: "Frontier Defence Ventures" }),
+        sourceBackedRawInvestor({ fullName: "Іван Петренко", currentOrganizationName: "Frontier Defence Ventures" }),
+        sourceBackedRawInvestor({ fullName: "Олена Коваль", currentOrganizationName: "Frontier Defence Ventures" }),
+      ],
+    }, providerInput());
+    const deduped = dedupeProviderPeopleForTest(parsed);
+
+    expect(deduped.values.map((person) => person.fullName)).toEqual(["Олена Коваль", "Іван Петренко"]);
+    expect(deduped.rejections).toEqual([expect.objectContaining({ candidate: "Олена Коваль", reasons: ["duplicate_identity"] })]);
+  });
+
+  it("normalizes names from every script without dropping letters", () => {
+    expect(normalizedName("Олена  Коваль")).toBe("олена коваль");
+    expect(normalizedName("José García")).toBe("jose garcia");
+    expect(normalizedName("Іван Петренко")).not.toBe(normalizedName("Олена Коваль"));
+    expect(fingerprintPerson({ fullName: "Олена Коваль", currentOrganizationName: "Fund" })).toBe("олена коваль|fund");
   });
 });
 

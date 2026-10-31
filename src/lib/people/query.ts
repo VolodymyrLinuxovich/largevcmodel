@@ -171,7 +171,8 @@ function extractTitles(query: string) {
 function extractAfterPhrases(query: string, phrases: string[]) {
   const values = new Set<string>();
   for (const phrase of phrases) {
-    const regex = new RegExp(`${escapeRegExp(phrase)}\\s+([^.,;?]{3,90})`, "i");
+    // Whole words only, so "using" is not found inside "focusing" or "housing".
+    const regex = new RegExp(`\\b${escapeRegExp(phrase)}\\s+([^.,;?]{3,90})`, "i");
     const match = query.match(regex);
     if (match?.[1]) {
       for (const part of match[1].split(/\band\b|,|\/|\+/i)) {
@@ -206,7 +207,7 @@ function extractExcludedTerms(query: string) {
 }
 
 function parseCheckRange(query: string) {
-  const between = query.match(/\bbetween\s+\$?([0-9.]+)\s*([kKmM]?)\s+(?:and|-|to)\s+\$?([0-9.]+)\s*([kKmM]?)/);
+  const between = query.match(/\bbetween\s+\$?([0-9.]+)\s*([kKmM]?)\s+(?:and|-|to)\s+\$?([0-9.]+)\s*([kKmM]?)/i);
   if (between) {
     return { min: money(between[1]!, between[2]!), max: money(between[3]!, between[4]!) };
   }
