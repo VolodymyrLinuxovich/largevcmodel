@@ -30,7 +30,8 @@ const optionalUrl = z
   .trim()
   .optional()
   .transform((value) => value || undefined)
-  .pipe(z.string().url().optional());
+  // Profiles are public, so a javascript: or data: link here would run for every viewer who clicks it.
+  .pipe(z.string().url().refine((value) => /^https?:\/\//i.test(value), "Only http(s) URLs are allowed.").optional());
 
 const optionalText = (max = 280) =>
   z
