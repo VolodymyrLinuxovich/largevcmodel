@@ -6,6 +6,7 @@ import {
   claimItems,
   companyFieldItems,
   concerns,
+  currentFitScore,
   iso,
   keyFacts,
   missingInformation,
@@ -113,11 +114,12 @@ function counterarguments(bundle: EvidenceBundle, established: EvidenceItem[], f
   if (traction.every((fact) => fact.status !== "ESTABLISHED")) {
     items.push(generated("No traction, revenue or customer evidence is established; any case for the company currently rests on descriptive information.", "Traction, revenue and customer facts are unverified or unavailable."));
   }
-  if (bundle.fitScore && bundle.fitScore.overall >= 60 && bundle.fitScore.confidence < 50) {
+  const fit = currentFitScore(bundle);
+  if (fit && fit.overall >= 60 && fit.confidence < 50) {
     items.push(
       generated(
         "The fit score is relatively high but its confidence is low; the alignment may not hold once gaps are filled.",
-        `Fit ${bundle.fitScore.overall} with confidence ${bundle.fitScore.confidence}.`,
+        `Fit ${fit.overall} with confidence ${fit.confidence}.`,
       ),
     );
   }
