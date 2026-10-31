@@ -16,7 +16,7 @@ type CalendarEventsResponse = {
     htmlLink?: string;
     hangoutLink?: string;
     conferenceData?: { entryPoints?: Array<{ uri?: string }> };
-    attendees?: Array<{ email?: string }>;
+    attendees?: Array<{ email?: string; responseStatus?: string }>;
     start?: { dateTime?: string; date?: string };
     end?: { dateTime?: string; date?: string };
     status?: string;
@@ -37,6 +37,15 @@ type CalendarInsertResponse = {
 function eventDate(value?: { dateTime?: string; date?: string }) {
   if (!value?.dateTime && !value?.date) return null;
   return new Date(value.dateTime ?? `${value.date}T00:00:00.000Z`);
+}
+
+type CalendarAttendee = NonNullable<NonNullable<CalendarEventsResponse["items"]>[number]["attendees"]>[number];
+
+/** Attendee emails that may be credited with the meeting: someone who declined did not meet. */
+export function meetingContactEmails(attendees: CalendarAttendee[] = []) {
+  return attendees
+    .filter((attendee) => attendee.email && attendee.responseStatus !== "declined")
+    .map((attendee) => attendee.email!.toLowerCase());
 }
 
 export async function syncGoogleCalendar(
@@ -64,8 +73,9 @@ export async function syncGoogleCalendar(
       const endsAt = eventDate(event.end);
       if (!startsAt || !endsAt) continue;
       const attendees = (event.attendees ?? []).map((attendee) => attendee.email).filter(Boolean) as string[];
-      const matchingContact = attendees.length
-        ? await prisma.contact.findFirst({ where: { userId, primaryEmail: { in: attendees.map((email) => email.toLowerCase()) } } })
+      const contactEmails = meetingContactEmails(event.attendees);
+      const matchingContact = contactEmails.length
+        ? await prisma.contact.findFirst({ where: { userId, primaryEmail: { in: contactEmails } } })
         : null;
       const existingEvent = await prisma.calendarEvent.findUnique({
         where: { userId_calendarId_providerEventId: { userId, calendarId: "primary", providerEventId: event.id } },
