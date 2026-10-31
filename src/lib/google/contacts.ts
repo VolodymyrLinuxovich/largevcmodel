@@ -65,6 +65,8 @@ export async function syncGoogleContacts(
         const googleName = person.names?.find((name) => name.displayName?.trim())?.displayName?.trim() || null;
         const fullName = googleName ?? primaryEmail;
         const providerId = person.resourceName ?? primaryEmail ?? undefined;
+        const phones = (person.phoneNumbers ?? []).map((phone) => phone.value?.trim()).filter(Boolean) as string[];
+        const photoUrl = person.photos?.find((photo) => photo.metadata?.primary)?.url ?? person.photos?.[0]?.url ?? null;
 
         if (!providerId && !primaryEmail) continue;
 
@@ -97,10 +99,10 @@ export async function syncGoogleContacts(
             fullName,
             primaryEmail,
             emails,
-            phones: (person.phoneNumbers ?? []).map((phone) => phone.value).filter(Boolean) as string[],
+            phones,
             organization,
             title,
-            profileImageUrl: person.photos?.find((photo) => photo.metadata?.primary)?.url ?? person.photos?.[0]?.url ?? null,
+            profileImageUrl: photoUrl,
             notes: biography,
             groups: (person.memberships ?? [])
               .map((membership) => membership.contactGroupMembership?.contactGroupResourceName)
@@ -113,10 +115,11 @@ export async function syncGoogleContacts(
             // A contact without a name in Google keeps the name stored in the CRM.
             fullName: googleName ?? undefined,
             emails: mergedEmails,
-            phones: (person.phoneNumbers ?? []).map((phone) => phone.value).filter(Boolean) as string[],
-            organization,
-            title,
-            profileImageUrl: person.photos?.find((photo) => photo.metadata?.primary)?.url ?? person.photos?.[0]?.url ?? null,
+            // Google fields only replace stored values when Google has a value.
+            phones: phones.length ? phones : undefined,
+            organization: organization ?? undefined,
+            title: title ?? undefined,
+            profileImageUrl: photoUrl ?? undefined,
             // Notes typed in the CRM win. A Google biography only fills empty notes.
             notes: existing?.notes ? undefined : (biography ?? undefined),
             groups: (person.memberships ?? [])
