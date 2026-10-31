@@ -110,6 +110,9 @@ export const startupProfileInputSchema = z.preprocess(normalizeStartupProfileInp
   fundraisingTimeline: optionalText(1000),
   customNotes: optionalText(4000),
   searchCriteria: z.record(z.string(), z.unknown()).nullable().default(null),
+}).refine((value) => value.minCheckSize === null || value.maxCheckSize === null || value.minCheckSize <= value.maxCheckSize, {
+  message: "Minimum check size cannot exceed maximum.",
+  path: ["maxCheckSize"],
 }));
 
 export const startupCriteriaSchema = z.object({
