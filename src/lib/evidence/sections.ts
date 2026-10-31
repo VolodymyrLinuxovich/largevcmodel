@@ -1,4 +1,4 @@
-import { claimToEvidence, isEstablished, matchesTopic, resolveKeyFacts, toSourceRef, type SensitiveFactKey } from "./classify";
+import { claimToEvidence, isEstablished, matchesTopic, RISK_PATTERN, resolveKeyFacts, toSourceRef, type SensitiveFactKey } from "./classify";
 import type { EvidenceBundle } from "./loader";
 import { safeExternalUrl } from "./safe-url";
 import type { EvidenceItem, GeneratedItem, KeyFact, SourceRef } from "./types";
@@ -269,7 +269,7 @@ export function concerns(bundle: EvidenceBundle, items: EvidenceItem[]): Generat
       basis: "Claims without cited sources or marked as inference.",
     });
   }
-  const riskClaims = byCategory(items.filter(isEstablished), /\b(risk|concern|litigation|regulat|churn|competition|competitor)\b/i);
+  const riskClaims = byCategory(items.filter(isEstablished), RISK_PATTERN);
   for (const claim of riskClaims.slice(0, 5)) {
     flags.push({ kind: "GENERATED_SUGGESTION", text: `Evidence mentions a potential risk: ${claim.text}`, basis: `Claim ${claim.record.id}.` });
   }
