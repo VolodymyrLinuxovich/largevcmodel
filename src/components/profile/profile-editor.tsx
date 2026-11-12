@@ -328,7 +328,7 @@ function ProductFields({ value, onChange }: { value: EditableProduct; onChange: 
           <option value="ARCHIVED">Archived</option>
         </Select>
       </Field>
-      <Field label="Team size"><Input value={value.teamSize ?? ""} onChange={(event) => onChange({ ...value, teamSize: Number(event.target.value) || null })} /></Field>
+      <Field label="Team size"><Input value={value.teamSize ?? ""} onChange={(event) => onChange({ ...value, teamSize: event.target.value.trim() ? Number(event.target.value) : null })} /></Field>
       <Field label="Funding status"><Input value={value.fundingStatus ?? ""} onChange={(event) => onChange({ ...value, fundingStatus: event.target.value })} /></Field>
       <Field label="Traction metric"><Input value={value.tractionMetric ?? ""} onChange={(event) => onChange({ ...value, tractionMetric: event.target.value })} /></Field>
       <Field label="Website URL"><Input value={value.websiteUrl ?? ""} onChange={(event) => onChange({ ...value, websiteUrl: event.target.value })} /></Field>
