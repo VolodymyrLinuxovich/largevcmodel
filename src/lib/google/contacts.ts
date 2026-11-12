@@ -74,19 +74,22 @@ export async function syncGoogleContacts(
           ? await prisma.contact.findUnique({ where: { userId_primaryEmail: { userId, primaryEmail } } })
           : null;
 
-        const existing =
-          existingByEmail ??
-          (providerId
-            ? await prisma.contact.findUnique({
+        const existingByProvider =
+          !existingByEmail && providerId
+            ? ((await prisma.contact.findUnique({
                 where: { userId_source_providerId: { userId, source: ContactSource.GOOGLE_CONTACTS, providerId } },
-              })
-            : null);
+              })) ??
+              // A contact first made by Gmail and matched by email on an earlier sync keeps its source.
+              // It still carries the Google id, so find it here once Google changes the primary email.
+              (await prisma.contact.findFirst({ where: { userId, providerId } })))
+            : null;
+        const existing = existingByEmail ?? existingByProvider;
         // Keep addresses learned from other sources, such as Gmail, and add any new ones from Google.
         const mergedEmails = Array.from(new Set([...emails, ...(existing?.emails ?? [])]));
         const biography = person.biographies?.[0]?.value?.trim() || null;
 
-        const where = existingByEmail
-          ? { id: existingByEmail.id }
+        const where = existing
+          ? { id: existing.id }
           : { userId_source_providerId: { userId, source: ContactSource.GOOGLE_CONTACTS, providerId: providerId || primaryEmail || "" } };
 
         const contact = await prisma.contact.upsert({
