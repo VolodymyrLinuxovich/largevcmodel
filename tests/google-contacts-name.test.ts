@@ -18,6 +18,7 @@ function fakePrisma(stored: { id: string; primaryEmail: string; fullName: string
     integration: { update: vi.fn(async () => ({})) },
     contact: {
       findUnique: vi.fn(async () => stored),
+      findFirst: vi.fn(async () => stored),
       upsert: vi.fn(async (args: { create: Record<string, unknown>; update: Record<string, unknown> }) => {
         upserts.push(args);
         return { id: "contact-1", fullName: stored?.fullName ?? null, primaryEmail: "ada@example.com" };
