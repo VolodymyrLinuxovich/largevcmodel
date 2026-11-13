@@ -367,9 +367,10 @@ export function parseNetworkObjective(input: z.infer<typeof networkSearchRequest
   const roles = roleHints(query);
   const fundingStages = unique([
     input.stage,
-    text.includes("pre-seed") || text.includes("pre seed") ? "pre-seed" : null,
-    text.includes("seed") ? "seed" : null,
-    text.includes("series a") ? "series A" : null,
+    /\bpre[- ]?seed\b/.test(text) ? "pre-seed" : null,
+    // "seed" on its own, not the tail of "pre-seed" and not "seeding".
+    /(?<!\bpre[- ]?)\bseed\b/.test(text) ? "seed" : null,
+    /\bseries a\b/.test(text) ? "series A" : null,
   ]);
   const geographies = unique([
     ...manual.geographies,
