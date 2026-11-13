@@ -416,7 +416,12 @@ export function parseNetworkObjective(input: z.infer<typeof networkSearchRequest
     ...manual.topics,
     ...positiveKeywords.filter((term) => !roles.includes(term) && !companies.flatMap(tokenize).includes(term)).slice(0, 6),
   ]);
-  const negativeKeywords = extractAfterPhrases(text, ["not", "without", "excluding"]).flatMap(tokenize);
+  // Stopwords are dropped, so "not in crypto" excludes "crypto" and not every text with "in".
+  const negativeKeywords = unique(
+    extractAfterPhrases(text, ["not", "without", "excluding"])
+      .flatMap(tokenize)
+      .filter((term) => !STOPWORDS.has(term)),
+  );
   const unavailableVerification = fundingStages.length
     ? ["Funding stage requires a connected public research provider unless already present in saved research claims."]
     : [];
@@ -611,7 +616,7 @@ function criterionScore(parsed: ParsedNetworkQuery, candidate: NetworkCandidate)
   }
 
   for (const keyword of parsed.negativeKeywords) {
-    if (keyword && text.includes(keyword)) {
+    if (keyword && containsAny(text, [keyword])) {
       contradicted.push(contradictionEvidence("Negative keyword", `Excluded keyword present: ${keyword}`, keyword, "User"));
     }
   }
