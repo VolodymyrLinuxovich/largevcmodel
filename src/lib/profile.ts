@@ -297,7 +297,12 @@ function productData(
     stage: product.stage,
     teamSize: product.teamSize,
     fundingStatus: product.fundingStatus,
-    tractionMetrics: product.tractionMetric ? ({ selfReported: product.tractionMetric, verification: "unverified self-reported" } as Prisma.InputJsonObject) : undefined,
+    tractionMetrics:
+      product.tractionMetric === null
+        ? Prisma.DbNull
+        : product.tractionMetric
+          ? ({ selfReported: product.tractionMetric, verification: "unverified self-reported" } as Prisma.InputJsonObject)
+          : undefined,
     websiteUrl: product.websiteUrl,
     demoUrl: product.demoUrl,
     repositoryUrl: product.repositoryUrl,
